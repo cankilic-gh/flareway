@@ -32,7 +32,7 @@ export class ResultsUI {
     const grade = $('res-grade');
     setText(grade, sc.grade);
     grade.dataset['grade'] = sc.grade;
-    setText($('res-mode'), `${r.mode === 'landing' ? 'Landing Challenge' : 'Takeoff Practice'} · ${r.code}${r.goArounds ? ` · ${r.goArounds} go-around${r.goArounds > 1 ? 's' : ''}` : ''}`);
+    $('res-mode').innerHTML = `${r.mode === 'landing' ? 'Landing Challenge' : 'Takeoff Practice'} · <span class="nowrap">${escapeHtml(r.code)}</span>${r.goArounds ? ` · ${r.goArounds} go-around${r.goArounds > 1 ? 's' : ''}` : ''}`;
     setText($('results-label'), sc.label);
     setText($('res-total'), String(sc.total));
     setText($('res-loss'), sc.biggestLoss);

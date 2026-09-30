@@ -1,5 +1,8 @@
 import {
+  CircleGeometry,
   Color,
+  Mesh,
+  MeshBasicMaterial,
   DirectionalLight,
   FogExp2,
   HemisphereLight,
@@ -61,11 +64,19 @@ export const createEnvironment = (renderer: WebGLRenderer, scene: Scene, q: Qual
   for (const k of ['turbidity', 'rayleigh', 'mieCoefficient', 'mieDirectionalG'] as const) eu[k]!.value = u[k]!.value;
   eu['sunPosition']!.value.copy(sunDir);
   envScene.add(envSky);
+  // The Preetham sky is bright below the horizon; a dark sea-coloured lower hemisphere keeps undersides and
+  // cabin interiors from being lit as if the ocean were a bright sky.
+  const seaGeo = new CircleGeometry(400, 32);
+  seaGeo.rotateX(-Math.PI / 2);
+  const sea = new Mesh(seaGeo, new MeshBasicMaterial({ color: new Color(0.018, 0.05, 0.065) }));
+  sea.position.y = -2;
+  envScene.add(sea);
   const pmrem = new PMREMGenerator(renderer);
   const envRT = pmrem.fromScene(envScene, 0, 0.1, 1000);
   scene.environment = envRT.texture;
   scene.environmentIntensity = 1.4;
   pmrem.dispose();
+  seaGeo.dispose();
   envSky.geometry.dispose();
   envSky.material.dispose();
 

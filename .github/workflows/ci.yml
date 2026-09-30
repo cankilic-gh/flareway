@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Install Chromium for the WebGL smoke test
+        run: npx playwright install --with-deps chromium
+      # Hosted runners have no GPU: one focused, truthful WebGL 2 smoke test on SwiftShader.
+      # The full Chrome + WebKit suite runs locally (npm run test:e2e).
+      - name: WebGL 2 smoke test
+        run: npm run test:e2e:smoke
+        env:
+          CI: 'true'

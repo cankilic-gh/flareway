@@ -9,6 +9,7 @@ export class ContactEffects {
   private readonly vel = new Float32Array(MAX * 3);
   private readonly age = new Float32Array(MAX).fill(1e9);
   private readonly life = new Float32Array(MAX).fill(1);
+  private readonly maxSize = new Float32Array(MAX).fill(1);
   private readonly size = new Float32Array(MAX);
   private readonly alpha = new Float32Array(MAX);
   private readonly tint = new Float32Array(MAX * 3);
@@ -84,7 +85,8 @@ export class ContactEffects {
       this.vel[i * 3 + 1] = 0.5 + strength * 0.6;
       this.vel[i * 3 + 2] = groundVel.z * 0.12 + rz;
       this.age[i] = 0;
-      this.life[i] = 1.2 + strength * 1.6;
+      this.life[i] = 0.7 + strength * 1.8;
+      this.maxSize[i] = 0.9 + strength * 2.6;
       const c = dust ? [0.55, 0.5, 0.38] : [0.86, 0.86, 0.86];
       this.tint.set(c, i * 3);
       this.size[i] = 0.6;
@@ -104,8 +106,8 @@ export class ContactEffects {
       this.pos[i * 3 + 1] = this.pos[i * 3 + 1]! + this.vel[i * 3 + 1]! * dt;
       this.pos[i * 3 + 2] = this.pos[i * 3 + 2]! + (this.vel[i * 3 + 2]! + wind.z * 0.6) * dt;
       this.vel[i * 3 + 1] = this.vel[i * 3 + 1]! * (1 - dt * 1.5);
-      this.size[i] = 0.6 + t * 3.2;
-      this.alpha[i] = 0.55 * (1 - t) * Math.min(1, a * 10);
+      this.size[i] = 0.4 + t * this.maxSize[i]!;
+      this.alpha[i] = 0.5 * (1 - t) * Math.min(1, a * 10);
     }
     for (const n of ['position', 'size', 'alpha', 'tint']) (this.geo.attributes[n] as BufferAttribute).needsUpdate = true;
   }

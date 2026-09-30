@@ -7,6 +7,10 @@ import {
   Vector3,
   WebGLRenderTarget,
   WebGLRenderer,
+  CanvasTexture,
+  Mesh,
+  MeshBasicMaterial,
+  PlaneGeometry,
   ACESFilmicToneMapping,
   SRGBColorSpace,
   PCFShadowMap,
@@ -19,6 +23,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js';
 import { createEnvironment, type Environment } from './environment';
+import { sampleGround, type GroundSample } from '../sim/airfield';
 import { AirfieldView } from './airfieldView';
 import { AircraftView, type AircraftPose } from './aircraftView';
 import { buildFallbackAircraft, buildFallbackAirfield } from './fallback';
@@ -100,6 +105,8 @@ export class World {
   private renderPass: CountingRenderPass | null = null;
   private bloom: UnrealBloomPass | null = null;
   private bokeh: BokehPass | null = null;
+  private contactBlob: Mesh | null = null;
+  private readonly groundSample: GroundSample = { height: 0, surface: 'runway' };
   private fpsAcc = 0;
   private fpsFrames = 0;
   private fps = 0;
@@ -158,6 +165,8 @@ export class World {
     }
     world.aircraft = aircraft;
     world.scene.add(world.airfield.root, world.aircraft.root, world.effects.points);
+    world.contactBlob = createContactBlob();
+    world.scene.add(world.contactBlob);
     world.setupComposer();
     world.resize();
     return world;
@@ -226,6 +235,16 @@ export class World {
     (this.airfield.glow.material.uniforms['uScale'] as { value: number }).value = scale;
     this.effects.scaleUniform.value = scale;
     this.effects.update(f.dt, f.wind);
+    if (this.contactBlob) {
+      // Soft ambient-occlusion blob that grounds the aircraft near the surface.
+      const g = sampleGround(f.pose.pos.x, f.pose.pos.z, this.groundSample);
+      const h = f.pose.pos.y - g.height - 1.08;
+      const blob = this.contactBlob;
+      blob.visible = g.surface !== 'water' && h < 14;
+      blob.position.set(f.pose.pos.x, g.height + 0.09, f.pose.pos.z);
+      blob.rotation.set(-Math.PI / 2, 0, Math.atan2(-_fwd.set(1, 0, 0).applyQuaternion(f.pose.quat).z, _fwd.x));
+      (blob.material as MeshBasicMaterial).opacity = 0.42 * Math.max(0, 1 - h / 14);
+    }
     const o = this.airfield.oceanUniforms;
     o.uSunDir.value.copy(this.env.sunDir);
     o.uSkyHorizon.value.copy(this.env.skyHorizon);
@@ -254,10 +273,44 @@ export class World {
     this.stats.fps = this.fps;
   }
 
+  /** Test-only: renders `frames` frames back to back with gl.finish() and returns the mean ms per frame. */
+  benchmark(frames: number, f: FrameInput): number {
+    const gl = this.renderer.getContext();
+    const px = new Uint8Array(4);
+    // readPixels stalls until the GPU has finished, unlike finish() on some ANGLE backends.
+    const sync = () => gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    sync();
+    const t0 = performance.now();
+    for (let i = 0; i < frames; i++) {
+      this.render({ ...f, dt: 1 / 120 });
+      sync();
+    }
+    return (performance.now() - t0) / frames;
+  }
+
   get camera(): Camera {
     return this.rig.camera;
   }
 }
 
 const _origin = new Vector3();
+const _fwd = new Vector3();
+
+const createContactBlob = (): Mesh => {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 64;
+  const ctx = c.getContext('2d')!;
+  const grad = ctx.createRadialGradient(64, 32, 2, 64, 32, 62);
+  grad.addColorStop(0, 'rgba(0,0,0,1)');
+  grad.addColorStop(0.55, 'rgba(0,0,0,0.45)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 128, 64);
+  const mat = new MeshBasicMaterial({ map: new CanvasTexture(c), transparent: true, depthWrite: false, opacity: 0.4, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 });
+  const mesh = new Mesh(new PlaneGeometry(9, 5.5), mat);
+  mesh.renderOrder = 2;
+  mesh.name = 'ContactShadow';
+  return mesh;
+};
 const _size = new Vector2();

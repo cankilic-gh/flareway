@@ -161,3 +161,43 @@ Autopilot sweep after tuning (16 seeds per preset, scripted soft-landing pilot f
 | Challenge | 774 | 132 fpm | 16 Side-loaded |
 
 The takeoff pilot scored 973–1000 across all presets with no failures.
+
+## 2026-09-30: renderer, UI, input, audio and browser verification
+
+### Process note
+
+The simulation slices above were strictly test-first. The renderer, HUD and UI were implemented first and then
+covered by the Playwright suite and by real-browser captures; the input-mapping unit tests (`tests/unit/input.test.ts`)
+were also written after `src/input/controls.ts`. Where the browser checks found defects they are recorded below as the
+RED side of the loop.
+
+### Browser-found defects (RED) and fixes (GREEN)
+
+| Found by | Defect | Fix |
+|---|---|---|
+| First chase-camera capture | Sky and aircraft blown out; bloom halo on white paint | Exposure 0.95 → 0.5, bloom threshold 4.5 (lights only), sun 5.2 |
+| QA capture looking north | Sun placed in the north (Three.js spherical theta 205° = north); Preetham sky HDR above bloom threshold | Sun moved to 335° (south-southwest); sky radiance capped below the bloom threshold in the sky shader |
+| Tower/replay capture | Terrain, grass and trees pale: sRGB values used as linear albedo | Linear-space albedos in terrain shader and vegetation vertex colours |
+| Replay capture | Aircraft looked ghosted with depth of field | BokehPass depth used a half-float target; switched to float depth and a 12 km replay far plane; aperture reduced |
+| Cockpit capture | Cabin headliner rendered as a bright white wall | PMREM environment had a bright below-horizon sky; added a dark sea lower hemisphere to the environment scene |
+| E2E budget test (228 > 220 draw calls) | Aircraft GLB has 89 separate meshes drawn in the main and shadow passes | Static aircraft parts merged per material (animated pivots and `Fuselage` kept); scene draw calls 183 → 65 |
+| E2E WebKit tutorial test | Safari does not tab to buttons and does not focus a clicked button, so focus was lost | Explicit focus cycling inside dialogs and explicit opener for focus return |
+| Mobile capture (375 px) | Setup panel covered the wordmark; HUD chips overlapped | Explicit grid rows on narrow screens, compact HUD placement |
+
+### Verification results
+
+- `npm run lint`: 0 problems. `npm run typecheck`: clean. `npm test`: 66/66 (Vitest).
+- `npm run test:e2e`: 36/36 across Chromium (GPU new-headless) and WebKit, against the production build.
+- CI smoke (`CI=true npm run test:e2e:smoke`, SwiftShader): 1/1.
+- Performance (Apple M5, Normal, 2400×1350 buffer, GPU-synchronized): 5.7–8.5 ms per frame, ≤ 108 scene draw calls,
+  ≤ 180 k scene triangles, ≤ 73 k near vegetation triangles. See `README.md`.
+
+### Visual QA
+
+Captured with Playwright on the real GPU at 1600×900 (plus 1280×633 and 375×812) into `artifacts/qa/game/`:
+title (Landing default), aerial island establishing view, calm final, crosswind final with crab, low approach over the
+beach with PAPI, cockpit, flare, main-wheel touchdown with tire smoke and shadow, rollout, runway excursion result,
+takeoff roll, rotation/liftoff, takeoff result, tutorial at 1280×633 and 1600×900, settings, and mobile title, HUD
+and results. Each capture was inspected for aircraft opacity, control-surface hinge placement, wheel contact,
+runway scale, ocean/shoreline continuity, PAPI state, windsock direction, vegetation and fog readability.
+Console errors during captures: none.

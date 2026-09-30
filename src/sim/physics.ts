@@ -421,15 +421,16 @@ const applyGear = (s: AircraftState, dt: number, force: Vector3, torque: Vector3
   }
 };
 
+const belowGround = (s: AircraftState, offset: readonly [number, number, number]): boolean => {
+  worldPoint(s, offset, _tmp);
+  return _tmp.y < groundHeightUnder(_tmp.x, _tmp.z) - 0.02;
+};
+
 const checkStrikes = (s: AircraftState): void => {
-  const test = (offset: readonly [number, number, number]): boolean => {
-    worldPoint(s, offset, _tmp);
-    return _tmp.y < groundHeightUnder(_tmp.x, _tmp.z) - 0.02;
-  };
-  s.strikes.tail = test(STRIKE_POINTS.TailStrikePoint);
-  s.strikes.prop = test(STRIKE_POINTS.PropTip);
-  s.strikes.wingL = test(STRIKE_POINTS.WingTip_L);
-  s.strikes.wingR = test(STRIKE_POINTS.WingTip_R);
+  s.strikes.tail = belowGround(s, STRIKE_POINTS.TailStrikePoint);
+  s.strikes.prop = belowGround(s, STRIKE_POINTS.PropTip);
+  s.strikes.wingL = belowGround(s, STRIKE_POINTS.WingTip_L);
+  s.strikes.wingR = belowGround(s, STRIKE_POINTS.WingTip_R);
 };
 
 const approach = (current: number, target: number, rate: number, dt: number): number => {

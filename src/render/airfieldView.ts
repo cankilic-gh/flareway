@@ -478,6 +478,7 @@ export class AirfieldView {
   private readonly _q = new Quaternion();
   private readonly _s = new Vector3();
   private readonly _up = new Vector3(0, 1, 0);
+  private readonly _beaconPos = new Vector3();
 
   /** Per-instance frustum + distance culling and LOD tiering; rewrites compact instance buffers. */
   updateVegetation(camera: Camera, force = false): void {
@@ -669,8 +670,7 @@ export class AirfieldView {
     this.swayUniforms.uTime.value = time;
     if (this.beaconHead) {
       this.beaconHead.rotation.y = time * 1.26;
-      const p = new Vector3();
-      this.beaconHead.getWorldPosition(p);
+      const p = this.beaconHead.getWorldPosition(this._beaconPos);
       const phase = (time * 1.26) % (Math.PI * 2);
       const green = phase > Math.PI;
       const c = green ? GREEN : WHITE;

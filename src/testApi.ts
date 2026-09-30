@@ -116,6 +116,7 @@ export const installTestApi = (app: App): void => {
       const pivot = app.world.airfield.windsockPivot;
       return { wind: w, pivotYaw: pivot?.rotation.y ?? null, pivotDroop: pivot?.rotation.z ?? null };
     },
+    benchmark: (frames = 120) => (app.lastFrame ? app.world.benchmark(frames, app.lastFrame) : null),
     stats: () => ({ ...app.world.stats, vegetation: { ...app.world.stats.vegetation } }),
     /** Fly the remaining attempt synchronously (bypasses rendering) for fast deterministic checks. */
     fastForward: (seconds: number) => {

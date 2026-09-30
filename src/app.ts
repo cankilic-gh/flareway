@@ -95,6 +95,7 @@ export class App {
   private readonly parked = { pos: new Vector3(236, 1.08, -70), quat: new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), Math.PI * 0.85) };
   private readonly titleWind: WindReadout = { fromDeg: 240, speedKt: 8, gust: 0.3 };
   frameCount = 0;
+  lastFrame: FrameInput | null = null;
 
   constructor(world: World, testMode: boolean) {
     this.world = world;
@@ -322,7 +323,7 @@ export class App {
         const horiz = Math.min(1, s.groundSpeed / 30);
         this.contacts.push({
           pos: g.world.clone(),
-          strength: Math.min(1.5, g.closingSpeed / 1.6 + horiz * 0.35),
+          strength: Math.min(1.5, g.closingSpeed / 1.6 + horiz * 0.15),
           dust: g.surface !== 'runway',
           closing: g.closingSpeed,
         });
@@ -509,12 +510,13 @@ export class App {
       runway = session.runway.id;
       buffet = this.flow.screen === 'playing' ? s.buffet : 0;
       windReadout(session.wind, s.time, this.wind);
-      for (const c of this.contacts.splice(0, this.contacts.length)) {
-        this.world.effects.emit(c.pos, s.vel, c.strength, Math.round(4 + c.strength * 10), c.dust);
+      for (const c of this.contacts) {
+        this.world.effects.emit(c.pos, s.vel, c.strength, Math.round(2 + c.strength * 10), c.dust);
         this.audio.chirp(c.strength, c.dust);
         this.world.shake.impulse(c.closing * 0.28);
         if (c.closing > 2.4) this.audio.thump(c.closing / 3);
       }
+      this.contacts.length = 0;
     }
     const frame: FrameInput = {
       pose: this.pose,
@@ -532,6 +534,7 @@ export class App {
       reducedMotion: this.settings.reducedMotion,
       dof,
     };
+    this.lastFrame = frame;
     this.world.render(frame);
 
     if (session && (this.flow.screen === 'playing' || this.flow.screen === 'paused' || this.flow.screen === 'goaround')) {

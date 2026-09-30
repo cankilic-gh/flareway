@@ -84,8 +84,14 @@ export class InputManager {
     this.edges.push(a);
   }
 
+  private readonly drained: EdgeAction[] = [];
+
+  /** Returns the queued one-shot actions in a reused array (valid until the next call). */
   drainEdges(): EdgeAction[] {
-    return this.edges.splice(0, this.edges.length);
+    this.drained.length = 0;
+    for (const e of this.edges) this.drained.push(e);
+    this.edges.length = 0;
+    return this.drained;
   }
 
   resetAxes(throttle: number, flaps: number): void {
