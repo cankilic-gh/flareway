@@ -109,3 +109,55 @@ The runway remains 900×23 m and both approach ends are close to the shoreline. 
 | Island airfield | 33,552 | 19 | 1.13 MB |
 
 Both remain comfortably inside browser budgets and have no external URI dependencies.
+
+## 2026-09-30: game build, deterministic simulation core (TDD)
+
+Branch: `feature/flareway-game`, created from the prepared asset commit `4715f7b`.
+
+Toolchain: TypeScript 5.9.3 strict, Three.js 0.186.1 (r186), Vite 8, Vitest 5, Playwright 1.63, ESLint 10 + typescript-eslint.
+TypeScript 7 was available but typescript-eslint 8.71 only supports `<6.1`, so 5.9.3 is pinned.
+
+### Asset integration finding
+
+`scripts`-level inspection of the GLB JSON confirmed the exported frame is +X forward, +Y up, +Z starboard and all
+anchors match `ASSET_BRIEF.md`. One verified integration defect: `Aileron_*`, `Flap_*` and `Elevator` pivot empties sit
+at body height y = 0 while their hinge lines are about 0.5–0.9 m higher (the generator places the pivot at
+`(hinge_x, 0, 0)`). Rotating the named pivot would swing the surface off the wing. Runtime fix (no regeneration):
+at bind time the renderer moves each pivot up to its measured hinge line and counter-offsets the child mesh, so the
+visual rest pose is unchanged and runtime still writes deflections only to the named pivot nodes. Suggested
+generator fix for a future asset pass: `control_panel()` should create the pivot at `(hinge_x, 0, z_hinge)`.
+
+### RED/GREEN evidence
+
+Each slice: test file first, run, record failure, implement, run again.
+
+| Slice | RED | GREEN |
+|---|---|---|
+| Seeded conditions + wind (`tests/unit/conditions.test.ts`) | Suite failed to import `src/sim/conditions` (0 tests) | 10/10 |
+| Flight dynamics (`flight.test.ts`) | Import failure; first implementation run 3 failed: lift ratio 1.0 (test read a shared result object twice), roll-authority ratio measured with damping included, weathervane test conflated with the coordinated-rudder assist | Tests corrected to measure pure authority and to separate air-mass drift from weathervaning; 9/9 |
+| Ground contacts (`ground.test.ts`) | 2 failed: contact positions lag one step (tolerance), and a 0.5 m/s touchdown "bounced" because the test began with lift = 1.36 W | Realistic flare state (L ≈ W, light back-pressure). Probe sweep over sink 0.3–4.2 m/s tuned main-gear damping from 3600/9500 to 2000/2000 N·s/m (spring-steel mains): no bounce ≤ 300 fpm, ~0.7 m bounce at 570 fpm, collapse ≥ 680 fpm. 10/10 |
+| PAPI (`papi.test.ts`) | Import failure | 5/5 |
+| Scoring (`scoring.test.ts`) | Import failure | 11/11 |
+| Session, flow, fixed step, scenarios (`session.test.ts`) | Import failure; then 2 failed (takeoff spawn tail strike from propwash; test pilot turning the wrong way), then 3 failed | See fixes below; 15/15 |
+
+Defects the scenario tests exposed in the simulation itself (not the tests):
+
+- **Coordinated-rudder assist sign was inverted.** It added rudder that increased sideslip; a 15° left bank turned the
+  aircraft right with 7° of slip and a spiral dive. Fixed to `+1.6·β`; a 15° bank now turns at 3.8°/s (ideal 4.2°/s)
+  with near-zero slip.
+- **Propwash on the elevator was too strong** (0.30): full aft stick at standstill lifted the nose into a tail strike.
+  Reduced to 0.05; the nose now lifts around 45 KIAS with half stick.
+- **Aileron authority was too high** (full deflection ≈ 124°/s roll). Reduced `clAileron` 0.16 → 0.075 (≈ 60°/s).
+- The test pilot's flare began too late and its rollout held no aileron into the wind, which let strong crosswinds roll
+  the aircraft onto a wingtip. Progressive flare and wings-level rollout fixed both.
+
+Autopilot sweep after tuning (16 seeds per preset, scripted soft-landing pilot flying through the normal input channel):
+
+| Preset | Avg score | Avg sink | Labels |
+|---|---:|---:|---|
+| Calm | 957 | 118 fpm | 13 Butter, 3 Smooth |
+| Breezy | 917 | 124 fpm | 12 Smooth, 3 Side-loaded, 1 Butter |
+| Gusty | 878 | 135 fpm | 10 Side-loaded, 3 Smooth, 3 Butter |
+| Challenge | 774 | 132 fpm | 16 Side-loaded |
+
+The takeoff pilot scored 973–1000 across all presets with no failures.
