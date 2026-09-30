@@ -16,7 +16,9 @@ export interface Settings {
   bindings: Bindings;
 }
 
-const KEY = 'flareway.settings.v1';
+// v2: A/D became rudder and the arrow keys became roll. Older saved bindings are dropped on load.
+const KEY = 'flareway.settings.v2';
+const LEGACY_KEYS = ['flareway.settings.v1'];
 
 export const defaultSettings = (): Settings => ({
   pitchAviation: true,
@@ -36,7 +38,15 @@ export const loadSettings = (): Settings => {
   const d = defaultSettings();
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return d;
+    if (!raw) {
+      for (const k of LEGACY_KEYS) {
+        const legacy = localStorage.getItem(k);
+        if (!legacy) continue;
+        const { bindings: _old, ...rest } = JSON.parse(legacy) as Partial<Settings>;
+        return { ...d, ...rest, bindings: { ...d.bindings } };
+      }
+      return d;
+    }
     const parsed = JSON.parse(raw) as Partial<Settings>;
     return { ...d, ...parsed, bindings: { ...d.bindings, ...(parsed.bindings ?? {}) } };
   } catch {

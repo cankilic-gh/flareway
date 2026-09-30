@@ -6,6 +6,7 @@ import {
   createAircraftState,
   defaultAssists,
   dragCoefficient,
+  headingDeg,
   liftCoefficient,
   neutralInput,
   stepAircraft,
@@ -195,5 +196,26 @@ describe('stability assist', () => {
     // Extra flap lift must not produce a climb: the altitude path stays close to the no-change path.
     expect(flap.y - hold.y).toBeLessThan(6);
     expect(Math.abs(flap.dv)).toBeLessThan(3);
+  });
+});
+
+describe('rudder authority with assists', () => {
+  it('player rudder yaws the aircraft even with the coordinated-rudder assist on', () => {
+    const turn = (assist: boolean) => {
+      const s = airborne(34);
+      s.ias = 34;
+      s.alpha = 4 * DEG;
+      s.alphaHold = 4 * DEG;
+      s.trim = trimElevatorFor(4 * DEG, 0);
+      const h0 = headingDeg(s.quat);
+      const assists = { ...defaultAssists(), coordinatedRudder: assist };
+      for (let i = 0; i < 120 * 4; i++) stepAircraft(s, { ...neutralInput(), yaw: 1, throttle: 0.5 }, assists, calm, SIM_DT);
+      return headingDeg(s.quat) - h0;
+    };
+    const off = turn(false);
+    const on = turn(true);
+    expect(off).toBeGreaterThan(8);
+    // The assist must not cancel deliberate rudder.
+    expect(on).toBeGreaterThan(off * 0.8);
   });
 });

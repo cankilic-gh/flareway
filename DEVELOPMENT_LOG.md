@@ -211,3 +211,17 @@ takeoff roll, rotation/liftoff, takeoff result, tutorial at 1280×633 and 1600×
 and results. Each capture was inspected for aircraft opacity, control-surface hinge placement, wheel contact,
 runway scale, ocean/shoreline continuity, PAPI state, windsock direction, vegetation and fog readability.
 Console errors during captures: none.
+
+## 2026-09-30: control layout change after user playtest
+
+User feedback: A/D only banked the aircraft and yawing from the tail felt like it did nothing; move the rudder to A/D and
+put the turning (bank) on the left/right arrow keys.
+
+- Investigation: a new test (`flight.test.ts › player rudder yaws the aircraft even with the coordinated-rudder assist
+  on`) showed full rudder already yaws 46° in 4 s without the assist and 53° with it, so the assist was not cancelling
+  rudder. The problem was discoverability: rudder lived on Q/E.
+- RED: `input.test.ts` asserted the new defaults (A/D rudder, ←/→ roll) and failed on the old bindings.
+- GREEN: defaults changed to A/D = rudder and nosewheel steering, ←/→ = roll, ↑/↓ = pitch. Ailerons no longer steer the
+  nosewheel on the ground, so holding the upwind wing down in a crosswind rollout does not turn the aircraft.
+  Settings storage moved to `flareway.settings.v2`; older saved bindings are dropped so the new layout applies.
+- Autopilot sweep unchanged (calm 958 avg, 13 Butter; takeoff 973–1000). Unit 69/69, E2E 36/36 (Chrome + WebKit).

@@ -213,14 +213,15 @@ test('control-surface nodes animate from player input', async ({ page }) => {
   await page.click('#start-btn');
   await expect(page.locator('#hud')).toBeVisible();
   const rest = await page.evaluate(() => window.__flareway!.surfaces());
-  await page.keyboard.down('KeyD');
+  // Right arrow banks right, Down arrow raises the nose, D is right rudder.
+  await page.keyboard.down('ArrowRight');
   await page.keyboard.down('ArrowDown');
-  await page.keyboard.down('KeyE');
+  await page.keyboard.down('KeyD');
   await page.waitForTimeout(900);
   const active = await page.evaluate(() => window.__flareway!.surfaces());
-  await page.keyboard.up('KeyD');
+  await page.keyboard.up('ArrowRight');
   await page.keyboard.up('ArrowDown');
-  await page.keyboard.up('KeyE');
+  await page.keyboard.up('KeyD');
   // Right roll: right aileron up (negative), left aileron down (positive).
   expect(active['Aileron_R']!).toBeLessThan(rest['Aileron_R']! - 0.05);
   expect(active['Aileron_L']!).toBeGreaterThan(rest['Aileron_L']! + 0.05);

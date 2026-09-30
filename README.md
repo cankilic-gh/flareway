@@ -58,9 +58,9 @@ The result screen shows the grade, the breakdown, touchdown metrics (fpm and m/s
 | Action | Keyboard | Gamepad |
 |---|---|---|
 | Throttle up / down (holds) | `W` / `S` | RB / LB (or right stick in the accessible mode) |
-| Roll left / right, nosewheel steering on the ground | `A` / `D` | left stick X |
+| Rudder left / right: yaw in the air, nosewheel steering on the ground | `A` / `D` | LT / RT |
+| Bank (roll) left / right | `←` / `→` | left stick X |
 | Nose down / nose up (aviation style) | `↑` / `↓` | left stick Y (pull back = nose up) |
-| Rudder left / right | `Q` / `E` | LT / RT |
 | Flaps down / up one step | `F` / `G` | Y / X |
 | Wheel brakes | `Space` | A |
 | Camera (chase, cockpit, runway side) | `C` | B |

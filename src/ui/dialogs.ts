@@ -87,9 +87,9 @@ export const renderTutorialKeys = (s: Settings): void => {
   const b = s.bindings;
   const rows: [string, string][] = [
     ['Throttle up / down', `${keyLabel(b.throttleUp)} / ${keyLabel(b.throttleDown)}`],
-    ['Roll (steer on ground)', `${keyLabel(b.rollLeft)} / ${keyLabel(b.rollRight)}`],
+    ['Bank left / right', `${keyLabel(b.rollLeft)} / ${keyLabel(b.rollRight)}`],
     [s.pitchAviation ? 'Nose down / nose up' : 'Nose up / nose down', `${keyLabel(b.pitchUpKey)} / ${keyLabel(b.pitchDownKey)}`],
-    ['Rudder left / right', `${keyLabel(b.rudderLeft)} / ${keyLabel(b.rudderRight)}`],
+    ['Rudder / nosewheel left / right', `${keyLabel(b.rudderLeft)} / ${keyLabel(b.rudderRight)}`],
     ['Flaps down / up', `${keyLabel(b.flapsDown)} / ${keyLabel(b.flapsUp)}`],
     ['Brakes', keyLabel(b.brake)],
     ['Go around', keyLabel(b.goAround)],

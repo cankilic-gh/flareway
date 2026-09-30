@@ -487,11 +487,12 @@ export const stepAircraft = (s: AircraftState, input: ControlInput, assists: Ass
   const k = 1 - Math.exp(-dt / AIRCRAFT.surfaceTimeConstant);
   s.aileron += (rollCmd - s.aileron) * k;
   s.elevator += (clamp(pitchCmd + s.trim, -1, 1) - s.elevator) * k;
-  const groundYaw = onGroundPrev ? clamp(yawCmd + rollCmd * 0.8, -1, 1) : yawCmd;
-  s.rudder += (clamp(groundYaw, -1, 1) - s.rudder) * k;
+  // Rudder pedals also steer the nosewheel on the ground; ailerons do not steer.
+  const groundYaw = clamp(yawCmd, -1, 1);
+  s.rudder += (groundYaw - s.rudder) * k;
   const gs = Math.hypot(s.vel.x, s.vel.z);
   const steerMax = lerp(TIRE.steerMaxLowSpeedDeg, TIRE.steerMaxHighSpeedDeg, smoothstep(2, 22, gs));
-  s.steerDeg += (clamp(groundYaw, -1, 1) * steerMax - s.steerDeg) * (1 - Math.exp(-dt / 0.12));
+  s.steerDeg += (groundYaw * steerMax - s.steerDeg) * (1 - Math.exp(-dt / 0.12));
   s.brake = clamp(input.brake, 0, 1);
 
   // Forces.

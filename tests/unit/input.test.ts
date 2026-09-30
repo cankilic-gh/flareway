@@ -17,6 +17,11 @@ describe('key bindings', () => {
     expect(DEFAULT_BINDINGS.pitchUpKey).toBe('ArrowUp');
     expect(DEFAULT_BINDINGS.brake).toBe('Space');
     expect(DEFAULT_BINDINGS.goAround).toBe('KeyT');
+    // A/D move the rudder (yaw/nosewheel), the arrow keys bank the wings.
+    expect(DEFAULT_BINDINGS.rudderLeft).toBe('KeyA');
+    expect(DEFAULT_BINDINGS.rudderRight).toBe('KeyD');
+    expect(DEFAULT_BINDINGS.rollLeft).toBe('ArrowLeft');
+    expect(DEFAULT_BINDINGS.rollRight).toBe('ArrowRight');
     expect(keyLabel('KeyW')).toBe('W');
     expect(keyLabel('ArrowUp')).toBe('↑');
   });
@@ -30,6 +35,20 @@ describe('key bindings', () => {
 });
 
 describe('keyboard control mapping', () => {
+  it('D is rudder right and the right arrow is roll right', () => {
+    const m = new InputManager(defaultSettings());
+    withKeys(m, ['KeyD']);
+    const out = neutralInput();
+    for (let i = 0; i < 60; i++) m.sample(SIM_DT, out);
+    expect(out.yaw).toBeGreaterThan(0.5);
+    expect(out.roll).toBe(0);
+    const m2 = new InputManager(defaultSettings());
+    withKeys(m2, ['ArrowRight']);
+    for (let i = 0; i < 60; i++) m2.sample(SIM_DT, out);
+    expect(out.roll).toBeGreaterThan(0.5);
+    expect(out.yaw).toBe(0);
+  });
+
   it('aviation pitch keys: Down arrow raises the nose, and keys ramp in over time', () => {
     const m = new InputManager(defaultSettings());
     withKeys(m, ['ArrowDown']);
