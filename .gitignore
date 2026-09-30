@@ -1,0 +1,12 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+.vercel/
+.env*
+!.env.example
+.DS_Store
+*.blend1
+__pycache__/
+*.pyc
+artifacts/qa/*.tmp

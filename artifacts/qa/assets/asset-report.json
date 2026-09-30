@@ -1,0 +1,64 @@
+{
+  "aircraft": {
+    "path": "public/assets/aircraft/ft172-trainer.glb",
+    "bytes": 489416,
+    "triangles": 8304,
+    "materials": 14,
+    "nodes": 88,
+    "requiredNodes": [
+      "Aileron_L",
+      "Aileron_R",
+      "AircraftRoot",
+      "CG",
+      "ChaseCamera",
+      "Elevator",
+      "Flap_L",
+      "Flap_R",
+      "Fuselage",
+      "MainGearContact_L",
+      "MainGearContact_R",
+      "MainWheel_L",
+      "MainWheel_R",
+      "NoseGearContact",
+      "NoseWheel",
+      "NoseWheelSteer",
+      "PilotCamera",
+      "Propeller",
+      "Rudder",
+      "TailStrikePoint",
+      "WingStatic"
+    ],
+    "externalUris": [],
+    "extensionsUsed": [
+      "KHR_materials_clearcoat",
+      "KHR_materials_transmission",
+      "KHR_materials_emissive_strength"
+    ]
+  },
+  "airfield": {
+    "path": "public/assets/airport/field-kit.glb",
+    "bytes": 1038304,
+    "triangles": 29928,
+    "materials": 16,
+    "nodes": 212,
+    "requiredNodes": [
+      "AirfieldRoot",
+      "AirportBeacon",
+      "BeaconHead",
+      "FenceSegmentTemplate",
+      "PAPI",
+      "Runway",
+      "RunwayLights",
+      "RunwayMarkings",
+      "TreeTemplate_Conifer",
+      "TreeTemplate_Deciduous",
+      "WindsockPivot",
+      "WindsockSleeve"
+    ],
+    "externalUris": [],
+    "extensionsUsed": [
+      "KHR_materials_clearcoat",
+      "KHR_materials_emissive_strength"
+    ]
+  }
+}
