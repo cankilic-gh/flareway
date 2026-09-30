@@ -1,10 +1,10 @@
 {
   "aircraft": {
     "path": "public/assets/aircraft/ft172-trainer.glb",
-    "bytes": 489416,
-    "triangles": 8304,
+    "bytes": 581060,
+    "triangles": 10852,
     "materials": 14,
-    "nodes": 88,
+    "nodes": 110,
     "requiredNodes": [
       "Aileron_L",
       "Aileron_R",
@@ -33,32 +33,39 @@
       "KHR_materials_clearcoat",
       "KHR_materials_transmission",
       "KHR_materials_emissive_strength"
-    ]
+    ],
+    "solidAircraftPaint": true
   },
   "airfield": {
     "path": "public/assets/airport/field-kit.glb",
-    "bytes": 1038304,
-    "triangles": 29928,
-    "materials": 16,
-    "nodes": 212,
+    "bytes": 1125980,
+    "triangles": 33552,
+    "materials": 19,
+    "nodes": 271,
     "requiredNodes": [
       "AirfieldRoot",
       "AirportBeacon",
+      "BeachRing",
       "BeaconHead",
       "FenceSegmentTemplate",
+      "IslandTerrain",
+      "OceanReferencePlane",
       "PAPI",
       "Runway",
       "RunwayLights",
       "RunwayMarkings",
       "TreeTemplate_Conifer",
       "TreeTemplate_Deciduous",
+      "VegetationSpawns",
       "WindsockPivot",
       "WindsockSleeve"
     ],
     "externalUris": [],
     "extensionsUsed": [
       "KHR_materials_clearcoat",
+      "KHR_materials_transmission",
       "KHR_materials_emissive_strength"
-    ]
+    ],
+    "solidAircraftPaint": null
   }
 }

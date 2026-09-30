@@ -76,6 +76,22 @@ def inspect(path: Path, required: set[str], max_bytes: int, max_triangles: int, 
     suspicious_nodes = sorted(name for name in names if re.search(r"(^|[_ -])(logo|badge|registration)([_ -]|$)", name, re.I))
     if suspicious_nodes:
         raise AssertionError(f"{path.name}: forbidden branding nodes: {suspicious_nodes}")
+    solid_aircraft_paint = None
+    if "Fuselage" in required:
+        materials = doc.get("materials", [])
+        paint_index = next((i for i, mat in enumerate(materials) if mat.get("name") == "Paint_WarmWhite"), None)
+        if paint_index is None:
+            raise AssertionError(f"{path.name}: Paint_WarmWhite material missing")
+        paint = materials[paint_index]
+        alpha = paint.get("pbrMetallicRoughness", {}).get("baseColorFactor", [1, 1, 1, 1])[3]
+        if paint.get("alphaMode", "OPAQUE") != "OPAQUE" or alpha < 0.999:
+            raise AssertionError(f"{path.name}: aircraft paint must remain opaque")
+        fuselage_node = next(node for node in doc.get("nodes", []) if node.get("name") == "Fuselage")
+        fuselage_mesh = doc.get("meshes", [])[fuselage_node["mesh"]]
+        material_indices = {prim.get("material") for prim in fuselage_mesh.get("primitives", [])}
+        if material_indices != {paint_index}:
+            raise AssertionError(f"{path.name}: Fuselage must use only Paint_WarmWhite, got {material_indices}")
+        solid_aircraft_paint = True
     tri_count = triangles(doc)
     mat_count = len(doc.get("materials", []))
     if path.stat().st_size > max_bytes:
@@ -93,6 +109,7 @@ def inspect(path: Path, required: set[str], max_bytes: int, max_triangles: int, 
         "requiredNodes": sorted(required),
         "externalUris": external,
         "extensionsUsed": doc.get("extensionsUsed", []),
+        "solidAircraftPaint": solid_aircraft_paint,
     }
 
 
@@ -104,13 +121,14 @@ def main() -> None:
         "TailStrikePoint",
     }
     airfield_required = {
-        "AirfieldRoot", "Runway", "RunwayMarkings", "RunwayLights", "PAPI", "WindsockPivot",
+        "AirfieldRoot", "IslandTerrain", "BeachRing", "OceanReferencePlane", "VegetationSpawns",
+        "Runway", "RunwayMarkings", "RunwayLights", "PAPI", "WindsockPivot",
         "WindsockSleeve", "TreeTemplate_Deciduous", "TreeTemplate_Conifer", "FenceSegmentTemplate",
         "AirportBeacon", "BeaconHead",
     }
     result = {
         "aircraft": inspect(AIRCRAFT, aircraft_required, 2_500_000, 45_000, 16),
-        "airfield": inspect(AIRFIELD, airfield_required, 3_000_000, 35_000, 16),
+        "airfield": inspect(AIRFIELD, airfield_required, 3_000_000, 45_000, 20),
     }
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     REPORT.write_text(json.dumps(result, indent=2) + "\n")

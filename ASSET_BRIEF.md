@@ -57,10 +57,14 @@ Runtime writes control deflections only to named pivot nodes. Visual rest angles
 - No third-party meshes, textures, fonts, HDRIs, or logos
 - One small generated normal map is allowed if embedded
 
-## Airfield kit
+## Island airfield kit
 
-A fictional non-towered training field using a 900 m x 23 m paved Runway 09/27. The asset includes:
+A fictional non-towered island training field using a 900 m x 23 m paved Runway 09/27. The runway sits on a flattened central plateau, with both approaches near the coast. The asset includes:
 
+- irregular `IslandTerrain`;
+- `BeachRing` shoreline transition;
+- `OceanReferencePlane` authoring placeholder for a runtime WebGL2 ocean shader;
+- `VegetationSpawns` anchors for instanced runtime trees;
 - asphalt runway and shoulder;
 - threshold, designation, centerline, aiming-point and edge markings;
 - modular edge, threshold and approach-light geometry;
@@ -70,6 +74,8 @@ A fictional non-towered training field using a 900 m x 23 m paved Runway 09/27. 
 - grass field base.
 
 The runtime may recreate repeated lights and markings with instancing. The GLB is the authoritative scale/style kit.
+
+Airfield budget after the island pass: <= 45,000 triangles, <= 20 materials and <= 3 MB. Runtime vegetation is not duplicated in the GLB; authored spawn anchors must feed `InstancedMesh` tiers.
 
 ## Visual QA
 
@@ -83,3 +89,4 @@ Required renders:
 6. runway threshold and PAPI overview;
 7. stabilized final-approach view;
 8. runway rollout view.
+9. full island aerial overview.

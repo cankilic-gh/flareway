@@ -268,6 +268,68 @@ def add_text_mesh(name: str, text: str, loc, size: float, rotation, col, mat, pa
     return obj
 
 
+def build_island_terrain(col, mats, parent):
+    """Create a lightweight irregular island with a runway-safe central plateau."""
+    segments = 72
+    rings = 18
+    verts = [(0.0, 0.0, -0.08)]
+    for ring in range(1, rings + 1):
+        r = ring / rings
+        for i in range(segments):
+            angle = 2 * math.pi * i / segments
+            irregular = 1.0 + 0.045 * math.sin(angle * 5 + 0.8) + 0.025 * math.sin(angle * 11)
+            x = math.cos(angle) * 590 * r * irregular
+            y = math.sin(angle) * 260 * r * (1.0 + 0.035 * math.cos(angle * 7))
+            coast = -2.35 + 2.30 * ((1.0 - r) ** 0.52)
+            runway_flat = abs(y) < 72 and abs(x) < 520
+            shoulder = max(0.0, min(1.0, (abs(y) - 55) / 175))
+            hills = shoulder * (1.0 - r * 0.55) * (10.0 + 16.0 * (0.5 + 0.5 * math.sin(x * 0.018 + angle * 3)))
+            z = -0.08 if runway_flat else coast + hills
+            verts.append((x, y, z))
+    faces = []
+    for i in range(segments):
+        faces.append((0, 1 + i, 1 + (i + 1) % segments))
+    for ring in range(1, rings):
+        a0 = 1 + (ring - 1) * segments
+        b0 = 1 + ring * segments
+        for i in range(segments):
+            faces.append((a0 + i, b0 + i, b0 + (i + 1) % segments, a0 + (i + 1) % segments))
+    terrain = mesh_obj("IslandTerrain", verts, faces, col, mats["grass"], parent, smooth=True)
+
+    beach_verts = []
+    for radius, z in ((0.88, -0.78), (1.015, -2.25)):
+        for i in range(segments):
+            angle = 2 * math.pi * i / segments
+            irregular = 1.0 + 0.045 * math.sin(angle * 5 + 0.8) + 0.025 * math.sin(angle * 11)
+            beach_verts.append((math.cos(angle) * 590 * radius * irregular,
+                                math.sin(angle) * 260 * radius * (1.0 + 0.035 * math.cos(angle * 7)), z))
+    beach_faces = []
+    for i in range(segments):
+        beach_faces.append((i, (i + 1) % segments, segments + (i + 1) % segments, segments + i))
+    mesh_obj("BeachRing", beach_verts, beach_faces, col, mats["sand"], parent, smooth=True)
+    cube("OceanReferencePlane", (0, 0, -2.55), (2200, 1600, 0.12), col, mats["water"], parent)
+
+    for index, angle in enumerate((0.35, 1.2, 2.15, 2.75, 3.65, 4.55, 5.35, 5.85), 1):
+        x = math.cos(angle) * 525
+        y = math.sin(angle) * 228
+        sphere(f"ShoreRock_{index}", (x, y, -0.4),
+               (5.0 + index % 3 * 2.0, 3.5 + index % 2 * 1.8, 3.0 + index % 4),
+               col, mats["cliff"], parent, 12, 6)
+
+    spawns = empty("VegetationSpawns", col, parent=parent)
+    for index in range(48):
+        angle = 2 * math.pi * index / 48 + 0.17 * math.sin(index * 1.7)
+        radius = 0.48 + 0.30 * ((index * 37) % 17) / 16
+        x = math.cos(angle) * 545 * radius
+        y = math.sin(angle) * 228 * radius
+        if abs(y) < 65 and abs(x) < 540:
+            y = 90 if y >= 0 else -90
+        anchor = empty(f"VegetationSpawn_{index+1:02d}", col, (x, y, 0.0), spawns)
+        anchor["variant"] = "conifer" if index % 3 == 0 else "deciduous"
+        anchor["scaleSeed"] = round(0.78 + (index % 7) * 0.07, 3)
+    return terrain
+
+
 def build_aircraft(col, mats):
     root = empty("AircraftRoot", col)
     root["assetName"] = "Flareway Trainer FT-172"
@@ -284,6 +346,7 @@ def build_aircraft(col, mats):
         (-4.98, 0.022, 0.035, 0.36),
     ]
     fuselage_loft("Fuselage", stations, col, mats["white"], root)
+    cube("CabinRoof", (0.08, 0, 0.73), (2.20, 1.48, 0.24), col, mats["white"], root, bevel=0.16)
 
     # Cowling seams, exhaust, spinner and propeller.
     torus("CowlingSeam", (2.55, 0, 0.04), 0.43, 0.008, col, mats["rubber"], root, rotation=(0, math.pi / 2, 0))
@@ -350,9 +413,22 @@ def build_aircraft(col, mats):
 
     # Cabin glazing and doors.
     cube("Windshield", (1.20, 0, 0.54), (0.055, 1.30, 0.62), col, mats["glass"], root, bevel=0.04, rotation=(0, -0.28, 0))
+    tube_between("WindshieldFrame_Top", (1.11, -0.67, 0.84), (1.11, 0.67, 0.84), 0.018, col, mats["rubber"], root)
+    tube_between("WindshieldFrame_Bottom", (1.28, -0.67, 0.25), (1.28, 0.67, 0.25), 0.018, col, mats["rubber"], root)
+    tube_between("WindshieldFrame_L", (1.11, 0.67, 0.84), (1.28, 0.67, 0.25), 0.018, col, mats["rubber"], root)
+    tube_between("WindshieldFrame_R", (1.11, -0.67, 0.84), (1.28, -0.67, 0.25), 0.018, col, mats["rubber"], root)
     for sign, side in ((1, "L"), (-1, "R")):
         cube(f"CabinWindow_{side}_Front", (0.42, sign * 0.765, 0.49), (0.90, 0.035, 0.47), col, mats["glass"], root, bevel=0.06)
         cube(f"CabinWindow_{side}_Rear", (-0.57, sign * 0.765, 0.47), (0.82, 0.035, 0.43), col, mats["glass"], root, bevel=0.06)
+        y_frame = sign * 0.792
+        for frame_name, a, b in (
+            ("FrontTop", (0.87, y_frame, 0.73), (-0.03, y_frame, 0.73)),
+            ("FrontBottom", (0.87, y_frame, 0.25), (-0.03, y_frame, 0.25)),
+            ("RearTop", (-0.16, y_frame, 0.69), (-0.98, y_frame, 0.69)),
+            ("RearBottom", (-0.16, y_frame, 0.25), (-0.98, y_frame, 0.25)),
+            ("WindowPost", (-0.08, y_frame, 0.22), (-0.08, y_frame, 0.76)),
+        ):
+            tube_between(f"WindowFrame_{side}_{frame_name}", a, b, 0.012, col, mats["rubber"], root)
         # Door seam and handle.
         tube_between(f"DoorSeam_{side}_A", (0.92, sign * 0.786, -0.26), (0.92, sign * 0.786, 0.80), 0.010, col, mats["rubber"], root)
         tube_between(f"DoorSeam_{side}_B", (-0.12, sign * 0.786, -0.26), (-0.12, sign * 0.786, 0.80), 0.010, col, mats["rubber"], root)
@@ -380,6 +456,7 @@ def build_aircraft(col, mats):
         wheel["runtimeAxis"] = "Z"
         torus(f"MainWheel_{side}_Tire", (0, 0, 0), 0.205, 0.075, col, mats["tire"], wheel, rotation=(math.pi / 2, 0, 0), major_segments=28)
         cylinder(f"MainWheel_{side}_Hub", (0, 0, 0), 0.105, 0.16, col, mats["metal"], wheel, rotation=(math.pi / 2, 0, 0), vertices=24)
+        sphere(f"MainGearFairing_{side}", (-0.18, sign * 1.02, -0.72), (0.42, 0.16, 0.23), col, mats["white"], root, 24, 12)
     nose_steer = empty("NoseWheelSteer", col, (2.25, 0, -0.28), root)
     nose_steer["runtimeAxis"] = "Y"
     tube_between("NoseGearStrut", (0, 0, 0), (0.05, 0, -0.50), 0.040, col, mats["metal"], nose_steer)
@@ -387,11 +464,18 @@ def build_aircraft(col, mats):
     nose_wheel["runtimeAxis"] = "Z"
     torus("NoseWheel_Tire", (0, 0, 0), 0.16, 0.058, col, mats["tire"], nose_wheel, rotation=(math.pi / 2, 0, 0), major_segments=24)
     cylinder("NoseWheel_Hub", (0, 0, 0), 0.078, 0.13, col, mats["metal"], nose_wheel, rotation=(math.pi / 2, 0, 0), vertices=20)
+    sphere("NoseGearFairing", (2.30, 0, -0.78), (0.34, 0.14, 0.19), col, mats["white"], root, 24, 12)
+
+    # Cowling intake, pitot tube and simple roof antennas add scale cues without branding.
+    cube("CowlingIntake", (2.89, 0, -0.10), (0.035, 0.42, 0.14), col, mats["rubber"], root, bevel=0.025)
+    tube_between("PitotTube", (0.32, 4.05, 0.74), (0.72, 4.05, 0.72), 0.010, col, mats["dark_metal"], root)
+    tube_between("Antenna_VHF", (-0.32, 0, 0.79), (-0.58, 0, 1.10), 0.010, col, mats["dark_metal"], root)
+    tube_between("Antenna_GPS", (-0.92, 0.12, 0.70), (-1.02, 0.12, 0.83), 0.014, col, mats["dark_metal"], root)
 
     # Original livery: cyan and charcoal pinstripes, no text or registration.
     for sign, side in ((1, "L"), (-1, "R")):
-        tube_between(f"Livery_Cyan_{side}", (2.45, sign * 0.66, 0.18), (-3.45, sign * 0.24, 0.58), 0.045, col, mats["accent"], root)
-        tube_between(f"Livery_Dark_{side}", (2.35, sign * 0.67, 0.08), (-3.35, sign * 0.25, 0.48), 0.022, col, mats["rubber"], root)
+        tube_between(f"Livery_Cyan_{side}", (2.45, sign * 0.66, 0.18), (-3.45, sign * 0.24, 0.58), 0.018, col, mats["accent"], root)
+        tube_between(f"Livery_Dark_{side}", (2.35, sign * 0.67, 0.08), (-3.35, sign * 0.25, 0.48), 0.010, col, mats["rubber"], root)
 
     # Lights.
     sphere("NavLight_Port", (-0.05, 5.45, 1.23), (0.07, 0.05, 0.04), col, mats["red_light"], root, 16, 8)
@@ -417,7 +501,7 @@ def build_airfield(col, mats):
     root["runwayWidthM"] = 23.0
     root["fictionalAirport"] = True
 
-    cube("GrassField", (0, 0, -0.20), (1200, 420, 0.30), col, mats["grass"], root)
+    build_island_terrain(col, mats, root)
     cube("Runway", (0, 0, 0.0), (900, 23, 0.12), col, mats["asphalt"], root, bevel=0.03)
     cube("RunwayShoulder_L", (0, 13.0, -0.015), (900, 3.0, 0.09), col, mats["shoulder"], root)
     cube("RunwayShoulder_R", (0, -13.0, -0.015), (900, 3.0, 0.09), col, mats["shoulder"], root)
@@ -574,7 +658,7 @@ def setup_render(studio_col, mats):
     scene.view_settings.look = "AgX - Medium High Contrast"
     scene.render.engine = "BLENDER_EEVEE"
     scene.render.image_settings.color_depth = "8"
-    scene.world.color = (0.055, 0.075, 0.11)
+    scene.world.color = (0.12, 0.20, 0.32)
 
     # Studio floor.
     floor = cube("StudioFloor", (0, 0, -1.07), (35, 35, 0.12), studio_col, mats["studio"], bevel=0.03)
@@ -584,6 +668,7 @@ def setup_render(studio_col, mats):
     cam = bpy.context.object
     cam.name = "QA_Camera"
     cam.data.lens = 56
+    cam.data.clip_end = 5000
     move_to_collection(cam, studio_col)
     scene.camera = cam
 
@@ -634,7 +719,7 @@ def main():
         "metal": material("Brushed_Aluminum", (0.55, 0.58, 0.60, 1), 0.24, 0.82),
         "dark_metal": material("Dark_Metal", (0.045, 0.055, 0.065, 1), 0.34, 0.62),
         "prop": material("Propeller_Black", (0.012, 0.014, 0.018, 1), 0.30),
-        "glass": material("Glass_Smoke", (0.08, 0.15, 0.19, 1), 0.12, transmission=0.45, alpha=0.45),
+        "glass": material("Glass_Smoke", (0.018, 0.035, 0.045, 1), 0.20, transmission=0.12, alpha=0.90),
         "seat": material("Seat_Stone", (0.30, 0.32, 0.33, 1), 0.50),
         "panel": material("Panel_Charcoal", (0.022, 0.028, 0.035, 1), 0.48),
         "display": material("Instrument_Glass", (0.01, 0.04, 0.06, 1), 0.22, emission=(0.03, 0.25, 0.35), emission_strength=0.45),
@@ -643,6 +728,9 @@ def main():
         "green_light": material("Light_Green", (0.01, 0.38, 0.05, 1), 0.22, emission=(0.01, 1, 0.08), emission_strength=5),
         "white_light": material("Light_White", (0.8, 0.85, 0.9, 1), 0.18, emission=(0.8, 0.9, 1), emission_strength=5),
         "grass": material("Grass", (0.07, 0.18, 0.07, 1), 0.95),
+        "sand": material("Coastal_Sand", (0.46, 0.36, 0.20, 1), 0.88),
+        "cliff": material("Coastal_Rock", (0.13, 0.11, 0.09, 1), 0.82),
+        "water": material("Ocean_Reference", (0.015, 0.16, 0.24, 1), 0.24, transmission=0.06, alpha=0.96),
         "asphalt": material("Runway_Asphalt", (0.055, 0.06, 0.067, 1), 0.92),
         "shoulder": material("Runway_Shoulder", (0.12, 0.13, 0.13, 1), 0.90),
         "marking": material("Runway_Marking", (0.82, 0.82, 0.76, 1), 0.70),
@@ -655,10 +743,6 @@ def main():
         "cone": material("Safety_Orange", (0.90, 0.22, 0.025, 1), 0.65),
         "studio": material("Studio_Ground", (0.095, 0.11, 0.13, 1), 0.78),
     }
-    # The runtime pilot camera sits inside the closed procedural fuselage shell.
-    # Cull its backfaces so the cockpit and windshield remain visible from inside.
-    mats["white"].use_backface_culling = True
-
     aircraft_root = build_aircraft(aircraft_col, mats)
     airfield_root = build_airfield(airfield_col, mats)
 
@@ -701,12 +785,13 @@ def main():
     floor.hide_render = True
     aircraft_root.location = (-360, 0, 1.08)
     render(scene, cam, "06-runway-threshold-papi.png", (-470, -70, 28), (-315, 0, 0), 52)
-    aircraft_root.location = (-475, 0, 21)
+    aircraft_root.location = (-600, 0, 9.2)
     aircraft_root.rotation_euler = (0, math.radians(-3.0), 0)
-    render(scene, cam, "07-stabilized-final.png", (-525, -9, 28), (-330, 0, 2), 58)
+    render(scene, cam, "07-stabilized-final.png", (-665, -4, 21), (-330, 0, 1.8), 58)
     aircraft_root.location = (-260, 0, 1.08)
     aircraft_root.rotation_euler = (0, 0, 0)
     render(scene, cam, "08-runway-rollout.png", (-320, -48, 12), (-250, 0, 1), 58)
+    render(scene, cam, "09-island-overview.png", (1080, -1080, 1380), (0, 0, -12), 58)
 
     aircraft_root.location = (0, 0, 0)
     aircraft_root.rotation_euler = (0, 0, 0)

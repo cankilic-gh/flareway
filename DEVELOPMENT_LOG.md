@@ -38,7 +38,7 @@ The generator writes:
 3. **Runway/camera polish:** corrected runway designator rotation, centered the final-approach composition, placed the aircraft on the authored ground contacts and moved the pilot camera above the panel.
 4. **Cockpit contract:** the exterior fuselage is a closed procedural shell. Pilot view now uses a documented camera-specific rule: hide only `Fuselage` while in cockpit view, leaving the panel, yokes, windows, controls and other aircraft nodes visible. The QA cockpit render proves the runway view using that contract.
 
-### Verified runtime budgets
+### Initial asset-pass runtime budgets
 
 | Asset | Bytes | Triangles | Materials | Nodes | External URIs |
 |---|---:|---:|---:|---:|---:|
@@ -63,3 +63,49 @@ The Blender Python generator is deterministic in semantic output: node contract,
 ### Claude handoff
 
 `CLAUDE_GAME_BUILD_PROMPT.md` specifies the complete game: Landing Challenge as default, Takeoff Practice, deterministic random wind/gusts, PAPI, touchdown scoring, runway consequences, replay, controls, WebGL 2 architecture, TDD and visual QA. Claude must build locally and must not push or deploy.
+
+## 2026-09-30: solid-aircraft and island realism pass
+
+### Transparency root cause
+
+The first exterior QA render looked ghosted even though the paint material used alpha 1. The generator had enabled global `use_backface_culling` on the shared warm-white aircraft material as a cockpit-camera workaround. Combined with the loft face orientation and several thin overlapping parts, exterior fuselage surfaces were culled and the cabin interior showed through.
+
+Fix:
+
+- removed global backface culling from aircraft paint;
+- retained the camera-specific cockpit rule that hides only the `Fuselage` node while cockpit view is active;
+- reduced glass transmission and raised glass opacity;
+- added windshield/side-window frames;
+- added cabin roof fairing, wheel fairings, cowling intake, pitot tube and antennas;
+- reduced livery geometry so it reads as a paint stripe rather than tubing.
+
+The exterior aircraft is now solid from chase/profile cameras. Only glass uses transmission/alpha.
+
+### Exact Three.js reference review
+
+Analyzed the two supplied Three.js X posts from their exact IDs and downloaded their exact videos for time-sampled contact sheets. Details and source URLs are in `VISUAL_REFERENCE_RESEARCH.md`.
+
+- Boring Forest uses a TSL/WebGPU-heavy forest/water pipeline. Its author reported 5.6M grass triangles before finding 95% were off-screen and still reported 45–50 W GPU draw in hot scenes. Flareway transfers its lighting, fog, shoreline and culling lessons, not its raw density.
+- Dan Greenheck's island experiment demonstrates terrain shaping, water, shore material zones and vegetation placement, but the author describes it as a possible premium Water Pro/starter pack. No code or asset is copied.
+
+### Island airfield
+
+Replaced the rectangular grass slab with:
+
+- `IslandTerrain`, an irregular low-cost terrain mesh with a flattened runway plateau;
+- `BeachRing` shoreline transition;
+- `OceanReferencePlane`, a scale placeholder for the runtime WebGL2 ocean shader;
+- shoreline rock silhouettes;
+- 48 deterministic `VegetationSpawn_*` anchors for runtime `InstancedMesh` trees;
+- an additional full-island aerial QA render.
+
+The runway remains 900×23 m and both approach ends are close to the shoreline. Runtime must preserve WebGL2 as baseline and implement bounded ocean, fog, terrain blending and vegetation LODs under the budgets in the revised Claude prompt.
+
+### Updated asset metrics
+
+| Asset | Triangles | Materials | Approximate GLB size |
+|---|---:|---:|---:|
+| FT-172 aircraft | 10,852 | 14 | 581 KB |
+| Island airfield | 33,552 | 19 | 1.13 MB |
+
+Both remain comfortably inside browser budgets and have no external URI dependencies.

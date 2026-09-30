@@ -26,3 +26,13 @@ Primary references used only for scale, aviation terminology, runway visual aids
 
 - Khronos glTF 2.0 specification: https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html
 - Blender glTF 2.0 exporter documentation: https://docs.blender.org/manual/en/latest/addons/import_export/scene_gltf2.html
+
+## Three.js visual references
+
+- Three.js repost of Andrei Provkin's Boring Forest: https://x.com/threejs/status/2105276283815129169
+- Original Boring Forest post and measured performance notes: https://x.com/AndreiProvkin/status/2105028422141428086
+- Live Boring Forest demo: https://boring-forest.vercel.app/
+- Three.js repost of Dan Greenheck's island/terrain experiment: https://x.com/threejs/status/2105218618535628930
+- Original Water Pro v4 island/terrain experiment post: https://x.com/dangreenheck/status/2105063750822691261
+
+These references are analyzed in `VISUAL_REFERENCE_RESEARCH.md`. They inform lighting, terrain, shoreline, vegetation, water and performance requirements only. No code or assets are copied. Dan Greenheck describes the island work as a possible premium asset/starter pack; it must not be used without a separate license review.

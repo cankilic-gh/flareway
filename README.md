@@ -8,8 +8,8 @@ Browser-native recreational takeoff and landing game preparation. The core game 
 
 | Asset | Runtime file | Verified budget |
 |---|---|---|
-| Flareway Trainer FT-172 | `public/assets/aircraft/ft172-trainer.glb` | 8,304 triangles, 14 materials, 488 KB |
-| Fictional Runway 09/27 field kit | `public/assets/airport/field-kit.glb` | 29,928 triangles, 16 materials, 1.04 MB |
+| Flareway Trainer FT-172 | `public/assets/aircraft/ft172-trainer.glb` | 10,852 triangles, 14 materials, about 581 KB |
+| Fictional island Runway 09/27 kit | `public/assets/airport/field-kit.glb` | 33,552 triangles, 19 materials, about 1.13 MB |
 | Editable source | `assets-src/blender/flareway-assets.blend` | Blender 5.2.1 LTS |
 
 The FT-172 is an original, logo-free high-wing trainer in the broad Cessna 172 class. It is not an official Cessna/Skyhawk product and contains no manufacturer branding or copied livery.
@@ -34,6 +34,7 @@ tools/blender/build-assets.sh --quick
 - Asset contract: [`ASSET_BRIEF.md`](ASSET_BRIEF.md)
 - Sources: [`SOURCES.md`](SOURCES.md)
 - Licenses: [`ASSET_LICENSES.md`](ASSET_LICENSES.md)
+- Three.js visual research: [`VISUAL_REFERENCE_RESEARCH.md`](VISUAL_REFERENCE_RESEARCH.md)
 
 ## Planned product
 
@@ -41,7 +42,7 @@ tools/blender/build-assets.sh --quick
 - Takeoff Practice is the secondary mode.
 - Deterministic random wind, crosswind and gust conditions.
 - Soft-touchdown, centerline, alignment and rollout scoring.
-- PAPI, windsock, runway lights and fictional airfield.
+- PAPI, windsock, runway lights and a fictional island airfield surrounded by a WebGL2 ocean.
 - Optional Tutorial, no forced training flow.
 - Static browser deployment with WebGL 2, Chrome and WebKit coverage.
 

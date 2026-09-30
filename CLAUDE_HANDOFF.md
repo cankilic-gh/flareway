@@ -24,12 +24,14 @@ If you prefer the interactive Claude Code app, open this folder and paste the en
 ## What is already finished
 
 - Original FT-172 Blender source and runtime GLB
-- Fictional Runway 09/27 airfield GLB
-- Eight asset QA renders
+- Solid/opaque polished FT-172 exterior with framed glass, wheel fairings and scale details
+- Fictional island Runway 09/27 airfield GLB with beach, ocean placeholder and vegetation anchors
+- Nine asset QA renders
 - Deterministic Blender generator
 - Asset license and source ledgers
 - Automated GLB contract inspector
 - Exact animation/contact/camera node contract
+- Exact Three.js reference research and a bounded WebGL2 island/ocean/vegetation plan
 
 Claude should build the game around these assets. It should not regenerate or replace them unless a verified integration defect requires a generator-first fix.
 

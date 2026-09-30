@@ -25,13 +25,14 @@ Friday has already produced and validated the art package:
 - Asset contract and dimensions: `ASSET_BRIEF.md`
 - License ledger: `ASSET_LICENSES.md`
 - Source ledger: `SOURCES.md`
+- Exact Three.js reference analysis: `VISUAL_REFERENCE_RESEARCH.md`
 - QA renders: `artifacts/qa/assets/`
 - Machine-readable report: `artifacts/qa/assets/asset-report.json`
 
 Verified assets:
 
-- FT-172 aircraft: 8,304 triangles, 14 materials, 489,416 bytes
-- Airfield kit: 29,928 triangles, 16 materials, 1,038,304 bytes
+- FT-172 aircraft: 10,852 triangles, 14 materials, 581,060 bytes
+- Island airfield kit: 33,552 triangles, 19 materials, 1,125,980 bytes
 - No external URI dependencies
 - No third-party mesh, texture, branding or registration
 
@@ -228,6 +229,10 @@ Load `public/assets/airport/field-kit.glb`.
 
 Use authored nodes:
 
+- `IslandTerrain`
+- `BeachRing`
+- `OceanReferencePlane`
+- `VegetationSpawns` and its authored child anchors
 - `Runway`
 - `RunwayMarkings`
 - `RunwayLights`
@@ -253,9 +258,13 @@ Calculate PAPI indication from aircraft eye/camera position relative to the PAPI
 
 Airfield rendering:
 
-- Preserve the fictional Runway 09/27 layout.
-- Instance trees, fence sections and repeated runway lights where useful.
-- Add procedural terrain variation, distant tree line and atmospheric perspective without changing the authored runway dimensions.
+- Preserve the fictional island and Runway 09/27 layout. Do not replace it with a generic flat plane.
+- Keep both runway approaches close to the shoreline so final approach reads as an island landing.
+- Treat `OceanReferencePlane` as a scale/authoring placeholder. Replace only its material with the bounded WebGL2 ocean shader described below; preserve its world scale and relationship to the island.
+- Use `VegetationSpawns` to place clustered `InstancedMesh` trees from `TreeTemplate_Deciduous` and `TreeTemplate_Conifer` instead of uniformly scattering unique objects.
+- Instance fence sections and repeated runway lights where useful.
+- Blend sand, grass and rock on `IslandTerrain` by height/slope masks without changing runway dimensions or contact height.
+- Add a distant tree line and atmospheric perspective that hides LOD transitions without obscuring the threshold.
 - Keep the runway, centerline, threshold, aiming blocks and edge lights readable from final approach.
 - Add subtle tire marks near the touchdown zone and grass color variation procedurally.
 - Do not copy a real airport.
@@ -289,6 +298,8 @@ Animate:
 - suspension visually from contact compression if practical.
 
 The authored exterior `Fuselage` is a closed shell. In cockpit camera mode, hide only `Fuselage` for that camera/view and keep instrument panel, yokes, windows, cowling-related children and control surfaces visible. Restore it atomically when leaving cockpit view. Do not delete or globally detach the node.
+
+The aircraft must remain visually solid from every exterior camera. Never apply transparency or backface-culling changes to `Fuselage` as a shortcut for cockpit visibility. Only the glass material may use transmission/alpha. Preserve window frames, wheel fairings, cowling intake, pitot tube and antenna scale cues.
 
 Keep a procedural low-detail fallback aircraft and runway so asset-load failure never blocks play. Show the GLB on normal/high quality; low quality may use fallback deliberately.
 
@@ -391,6 +402,46 @@ Add the disclaimer prominently but concisely:
 
 > Recreational game, not flight training or an aircraft operating guide. Simplified fictional physics and performance.
 
+## VISUAL REALISM CONTRACT
+
+Read `VISUAL_REFERENCE_RESEARCH.md` before implementing the renderer. It documents the exact Three.js posts and videos supplied by the user.
+
+Do not copy their code/assets or add a paid dependency. Boring Forest is a TSL/WebGPU-heavy reference whose author reported millions of grass triangles and high GPU power. Dan Greenheck describes the island/terrain work as a possible premium Water Pro/starter-pack product. Transfer visual principles only.
+
+Required WebGL2 baseline:
+
+- `WebGLRenderer` with sRGB output and ACES filmic tone mapping;
+- PMREM environment lighting plus one coherent directional sun;
+- tightly fitted aircraft/runway shadow frustum, not a huge high-resolution whole-island shadow map;
+- island terrain blending sand, grass and rock from height/slope masks;
+- one ocean surface with two scrolling normal scales, Fresnel, depth/shore color, sun glint and bounded shoreline foam;
+- distance fog/atmospheric haze that blends the horizon and LODs without hiding runway markings;
+- clustered `InstancedMesh` vegetation from authored spawn anchors;
+- near/mid/far vegetation tiers, with far tree-line silhouettes or cards;
+- subtle AO/GTAO only on Normal/High after measuring cost;
+- anti-aliasing and restrained bloom for runway/PAPI lights;
+- depth of field only in replay/cinematic cameras, never active landing gameplay.
+
+Aircraft material requirements:
+
+- opaque warm-white painted fuselage with coherent roughness/clearcoat, never ghosted;
+- dark framed glass that reads as glazing, not transparent boxes;
+- distinct rubber, tire, aluminum, propeller and instrument materials;
+- contact shadows at wing struts, gear, wheel fairings and cabin/wing junctions;
+- environment reflections kept subtle enough that white paint remains readable;
+- no global transparency/backface-culling applied to exterior aircraft materials.
+
+Island composition requirements:
+
+- show ocean and shoreline during final approach, not only a grass rectangle;
+- keep the threshold and PAPI readable against terrain;
+- use vegetation clusters to frame the runway without putting tall trees in protected approach corridors;
+- use aerial island view for title/replay establishing shots;
+- use runway-side low camera around touchdown to emphasize suspension, tire smoke and softness;
+- retain bright daytime readability even when borrowing fog, water and vegetation ideas from darker references.
+
+WebGPU can be an optional future enhancement, but no required feature, test or quality tier may depend on it. Chrome and WebKit WebGL2 remain mandatory.
+
 ## TECHNOLOGY
 
 Use the same proven browser-native architecture as Steerageway unless this repository already contains a stronger compatible setup:
@@ -415,8 +466,12 @@ Normal quality target on Apple Silicon/mid-range desktop:
 - 60 fps minimum; aim for 120 fps on the current development Mac
 - <= 220 draw calls in the representative landing scene
 - <= 750,000 visible triangles
+- <= 250,000 visible vegetation triangles near the runway on Normal
+- no multi-million-triangle grass field; use sparse near detail and shader/material variation elsewhere
+- one ocean draw plus bounded reflection/normal work; do not render a second full scene reflection every frame unless measured inside budget
 - device pixel ratio capped by quality preset
 - instancing for repeated lights, trees, fence and grass/detail props
+- frustum and distance culling proven with runtime counters, not assumed
 - load both provided GLBs without external network dependencies
 - no unbounded allocations in the frame loop
 
@@ -477,8 +532,10 @@ Do not declare completion from tests alone.
 Capture and inspect at least:
 
 - title with Landing default;
+- aerial island establishing view showing the entire shoreline and runway;
 - calm final approach;
 - crosswind final approach;
+- low approach over ocean/beach with runway and PAPI readable in the same frame;
 - cockpit view;
 - flare just before contact;
 - main-wheel touchdown;
@@ -489,7 +546,7 @@ Capture and inspect at least:
 - result/replay screen;
 - Tutorial at 1280x633 and 1600x900.
 
-Check console/network errors, GLB node binding, control-surface directions, wheel contact, runway scale, PAPI transitions, windsock direction and visual clipping.
+Check console/network errors, GLB node binding, solid aircraft opacity, control-surface directions, wheel contact, runway scale, ocean/shoreline continuity, PAPI transitions, windsock direction, vegetation culling/instancing, fog readability and visual clipping.
 
 ## FILES AND DOCUMENTATION
 
@@ -512,6 +569,7 @@ Preserve:
 - `ASSET_BRIEF.md`;
 - `ASSET_LICENSES.md`;
 - `SOURCES.md`;
+- `VISUAL_REFERENCE_RESEARCH.md`;
 - `PORTFOLIO_RELEASE_PLAN.md`;
 - this prompt.
 
