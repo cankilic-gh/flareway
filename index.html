@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="Flareway: a browser takeoff and landing game about making the softest touchdown on a fictional island runway. Recreational game, not flight training." />
+    <meta name="theme-color" content="#0b1620" />
+    <title>Flareway</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b1620'/%3E%3Cpath d='M10 40h44' stroke='%23f3efe6' stroke-width='4' stroke-linecap='round'/%3E%3Cpath d='M16 30c10-2 20-8 32-16' stroke='%2319b6d6' stroke-width='5' stroke-linecap='round' fill='none'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <canvas id="scene" aria-label="Flareway 3D view"></canvas>
+
+    <div id="loading" class="loading" role="status" aria-live="polite">
+      <div class="loading__mark">FLAREWAY</div>
+      <div class="loading__bar"><span></span></div>
+      <p class="loading__text">Preparing the island…</p>
+    </div>
+
+    <main id="title" class="screen title" hidden>
+      <section class="title__intro">
+        <p class="eyebrow">Island Runway 09/27</p>
+        <h1 class="title__wordmark">Flareway</h1>
+        <p class="title__tag">Fly the final. Hold the flare. Make it butter.</p>
+      </section>
+
+      <section class="panel title__setup" aria-label="Flight setup">
+        <fieldset class="modes">
+          <legend class="label">Mode</legend>
+          <label class="mode-card">
+            <input type="radio" name="mode" value="landing" checked />
+            <span class="mode-card__body">
+              <span class="mode-card__name">Landing Challenge</span>
+              <span class="mode-card__desc">Start on a 1.4 nm final. Touch down softly on the centerline.</span>
+            </span>
+          </label>
+          <label class="mode-card">
+            <input type="radio" name="mode" value="takeoff" />
+            <span class="mode-card__body">
+              <span class="mode-card__name">Takeoff Practice</span>
+              <span class="mode-card__desc">Hold the centerline, rotate near 55 KIAS, climb at 70–80.</span>
+            </span>
+          </label>
+        </fieldset>
+
+        <fieldset class="presets">
+          <legend class="label">Conditions</legend>
+          <div class="segmented" role="radiogroup" aria-label="Condition preset" id="preset-group"></div>
+        </fieldset>
+
+        <div class="code-row">
+          <label class="label" for="code-input">Condition code</label>
+          <div class="code-row__field">
+            <input id="code-input" class="code-input" spellcheck="false" autocomplete="off" maxlength="9" aria-describedby="code-help" />
+            <button type="button" class="btn btn--ghost btn--icon" id="shuffle-btn" aria-label="New random conditions" title="New random conditions">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3.5c2 0 3.1 1 4.3 2.8l.9 1.4c1.2 1.8 2.3 2.8 4.3 2.8H20M17 11l3 3-3 3M4 17h3.5c1.3 0 2.2-.4 3-1.2M13.3 8.2c.8-.8 1.7-1.2 3-1.2H20M17 4l3 3-3 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+          <p id="code-help" class="hint">Same code, same wind. Share it to compare landings.</p>
+        </div>
+
+        <div class="briefing" id="briefing" aria-live="polite"></div>
+
+        <div class="title__actions">
+          <button type="button" class="btn btn--primary" id="start-btn">Start flight <kbd>Enter</kbd></button>
+          <div class="title__secondary">
+            <button type="button" class="btn btn--ghost" id="tutorial-btn">Tutorial</button>
+            <button type="button" class="btn btn--ghost" id="settings-btn">Settings</button>
+          </div>
+        </div>
+        <p class="device-note" id="device-note" hidden>Flareway plays with a keyboard or a gamepad.</p>
+      </section>
+
+      <p class="disclaimer">Recreational game, not flight training or an aircraft operating guide. Simplified fictional physics and performance.</p>
+    </main>
+
+    <div id="hud" class="hud" hidden aria-hidden="false">
+      <div class="hud__top-left">
+        <span class="chip" id="hud-mode">Landing</span>
+        <span class="chip chip--code" id="hud-code">—</span>
+        <span class="chip chip--muted" id="hud-assists" title="Active assists">Assists</span>
+      </div>
+      <div class="hud__top-center">
+        <div class="stability" id="hud-stability" hidden></div>
+        <div class="papi-repeater" id="hud-papi" aria-label="PAPI" hidden><i></i><i></i><i></i><i></i></div>
+        <div class="warning" id="hud-stall" role="alert" hidden>STALL</div>
+        <div class="toast" id="hud-toast" aria-live="polite"></div>
+      </div>
+      <div class="hud__wind panel panel--hud" id="hud-wind">
+        <svg class="wind-arrow" viewBox="-20 -20 40 40" aria-hidden="true"><circle r="17" fill="none" stroke="currentColor" stroke-opacity=".25"/><path id="hud-wind-arrow" d="M0 -14 L5 -4 L1.5 -5 L1.5 14 L-1.5 14 L-1.5 -5 L-5 -4 Z" fill="currentColor"/></svg>
+        <div>
+          <div class="hud__big-small" id="hud-wind-text">—</div>
+          <div class="hud__label" id="hud-xwind">—</div>
+        </div>
+      </div>
+      <div class="hud__primary panel panel--hud">
+        <div class="readout readout--hero">
+          <span class="readout__value" id="hud-kias">0</span>
+          <span class="readout__unit">KIAS</span>
+        </div>
+        <div class="readout-grid">
+          <div class="readout"><span class="hud__label">AGL</span><span class="readout__value" id="hud-agl">0</span><span class="readout__unit">ft</span></div>
+          <div class="readout"><span class="hud__label">VS</span><span class="readout__value" id="hud-vs">0</span><span class="readout__unit">fpm</span></div>
+          <div class="readout"><span class="hud__label">HDG</span><span class="readout__value" id="hud-hdg">000</span><span class="readout__unit" id="hud-rwy">RWY</span></div>
+        </div>
+        <div class="slip" aria-label="Slip indicator"><span id="hud-slip"></span></div>
+      </div>
+      <div class="hud__systems panel panel--hud">
+        <div class="throttle" aria-label="Throttle"><span id="hud-throttle-fill"></span></div>
+        <div class="systems-col">
+          <div class="readout"><span class="hud__label">THR</span><span class="readout__value" id="hud-throttle">0</span><span class="readout__unit" id="hud-throttle-unit">%</span></div>
+          <div class="flaps" id="hud-flaps" aria-label="Flaps"><i>0</i><i>10</i><i>20</i><i>30</i></div>
+          <div class="chip chip--brake" id="hud-brake" hidden>BRAKE</div>
+        </div>
+      </div>
+      <div class="centerline" id="hud-centerline" hidden aria-label="Centerline deviation">
+        <div class="centerline__track"><span class="centerline__edge centerline__edge--l"></span><span class="centerline__mid"></span><span class="centerline__edge centerline__edge--r"></span><span class="centerline__marker" id="hud-centerline-marker"></span></div>
+        <div class="hud__label" id="hud-centerline-text">0.0 m</div>
+      </div>
+      <svg class="markers" id="hud-markers" aria-hidden="true">
+        <g id="hud-fpv" visibility="hidden"><circle r="7" fill="none" stroke="#5fe3ff" stroke-width="2"/><path d="M-17 0h10M7 0h10M0 -7v-7" stroke="#5fe3ff" stroke-width="2"/></g>
+        <g id="hud-aim" visibility="hidden"><rect x="-9" y="-5" width="18" height="10" fill="none" stroke="#f5b53d" stroke-width="1.6" stroke-dasharray="4 3"/></g>
+      </svg>
+      <div class="hud__hint" id="hud-hint"><kbd>T</kbd> go around · <kbd>C</kbd> camera · <kbd>Esc</kbd> pause</div>
+      <div class="fade" id="fade"></div>
+    </div>
+
+    <div id="pause" class="overlay" hidden>
+      <section class="panel dialog dialog--small" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+        <h2 id="pause-title" tabindex="-1">Paused</h2>
+        <div class="stack">
+          <button type="button" class="btn btn--primary" data-action="resume">Resume</button>
+          <button type="button" class="btn btn--ghost" data-action="retry">Retry same conditions</button>
+          <button type="button" class="btn btn--ghost" data-action="settings">Settings</button>
+          <button type="button" class="btn btn--ghost" data-action="tutorial">Tutorial</button>
+          <button type="button" class="btn btn--ghost" data-action="title">Return to title</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="results" class="results" hidden>
+      <section class="panel results__panel" role="dialog" aria-modal="false" aria-labelledby="results-label">
+        <header class="results__head">
+          <div class="grade" id="res-grade">S</div>
+          <div>
+            <p class="eyebrow" id="res-mode">Landing Challenge · CLM-00001</p>
+            <h2 id="results-label" tabindex="-1">Butter</h2>
+            <p class="results__score"><span id="res-total">0</span><span>/1000</span></p>
+          </div>
+        </header>
+        <p class="callout" id="res-loss"></p>
+        <div class="breakdown" id="res-breakdown"></div>
+        <div class="metrics" id="res-metrics"></div>
+        <figure class="plot">
+          <figcaption class="label">Centerline track</figcaption>
+          <svg id="res-plot" viewBox="0 0 320 90" preserveAspectRatio="none" role="img" aria-label="Lateral offset from centerline along the runway"></svg>
+        </figure>
+        <div class="results__actions">
+          <button type="button" class="btn btn--primary" data-action="retry">Retry <kbd>R</kbd></button>
+          <button type="button" class="btn btn--ghost" data-action="new">New conditions <kbd>N</kbd></button>
+          <button type="button" class="btn btn--ghost" data-action="replay">Replay <kbd>P</kbd></button>
+          <button type="button" class="btn btn--ghost" data-action="title">Title</button>
+        </div>
+        <p class="disclaimer disclaimer--small">Recreational game, not flight training or an aircraft operating guide. Simplified fictional physics and performance.</p>
+      </section>
+      <div class="replay-tag" id="replay-tag" hidden>Replay <span id="replay-speed"></span></div>
+    </div>
+
+    <div id="tutorial" class="overlay" hidden>
+      <section class="panel dialog" role="dialog" aria-modal="true" aria-labelledby="tutorial-title">
+        <header class="dialog__head">
+          <h2 id="tutorial-title" tabindex="-1">How to fly Flareway</h2>
+          <button type="button" class="btn btn--ghost" data-action="close">Back</button>
+        </header>
+        <div class="dialog__scroll" tabindex="0">
+          <h3>Controls</h3>
+          <div id="tutorial-keys" class="keys"></div>
+          <p>Keys ramp in: a short tap is a small correction, holding gives full deflection. On the ground, A/D steer the nosewheel and rudder together. A gamepad works too: left stick flies, triggers are rudder, bumpers are throttle, A brakes, Y/X move the flaps.</p>
+          <h3>Airspeed, pitch and throttle</h3>
+          <p>Pitch sets your airspeed; throttle sets whether you climb or descend. On final, hold 60–70 KIAS. Too fast and you will float down the runway; too slow and the stall warning sounds. With the stability assist on, the aircraft holds the attitude you leave it in.</p>
+          <h3>Crosswind, crab and slip</h3>
+          <p>A crosswind pushes you sideways. On final, point the nose slightly into the wind (crab) so your track stays on the centerline. Just before touchdown, use rudder to line the nose up with the runway and lower the upwind wing a little so you do not drift. The wind arrow shows where the wind comes from.</p>
+          <h3>PAPI lights</h3>
+          <p>Four lights beside the runway show your glide path. Two white and two red means on path. More white means high, more red means low. Four red is dangerously low.</p>
+          <div class="papi-legend" aria-hidden="true"><span class="w"></span><span class="w"></span><span class="r"></span><span class="r"></span></div>
+          <h3>Flare and touchdown</h3>
+          <p>Cross the threshold at about 60 KIAS. Around 15–20 ft, bring the throttle to idle and gently raise the nose so the descent slows to almost nothing. Let the main wheels touch first, then lower the nosewheel as speed decays. Softness, centerline and alignment are all scored.</p>
+          <h3>Go-around</h3>
+          <p>Unstable, too high, too fast, or drifting? Press <kbd>T</kbd>. A go-around is good judgement, not a failure. You return to final with the same conditions.</p>
+          <h3>Centerline and excursions</h3>
+          <p>Stay on the paved runway. After touchdown keep the nose on the centerline with small rudder inputs, then brake progressively with <kbd>Space</kbd>. A wheel on the grass or running past the end ends the attempt.</p>
+          <p class="disclaimer disclaimer--small">Recreational game, not flight training or an aircraft operating guide. Simplified fictional physics and performance.</p>
+        </div>
+      </section>
+    </div>
+
+    <div id="settings" class="overlay" hidden>
+      <section class="panel dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <header class="dialog__head">
+          <h2 id="settings-title" tabindex="-1">Settings</h2>
+          <button type="button" class="btn btn--ghost" data-action="close">Done</button>
+        </header>
+        <div class="dialog__scroll" tabindex="0">
+          <h3>Assists</h3>
+          <div class="toggles">
+            <label class="toggle"><input type="checkbox" data-setting="stabilityAssist" /><span>Pitch stability assist <small>Holds the attitude you release the controls at.</small></span></label>
+            <label class="toggle"><input type="checkbox" data-setting="coordinatedRudder" /><span>Coordinated-rudder assist <small>Adds rudder to keep turns balanced in flight.</small></span></label>
+            <label class="toggle"><input type="checkbox" data-setting="centerlineGuidance" /><span>Centerline guidance <small>Extended centerline, deviation bar and PAPI repeater.</small></span></label>
+            <label class="toggle"><input type="checkbox" data-setting="approachMarker" /><span>Approach path marker <small>Flight path marker and touchdown aim box.</small></span></label>
+          </div>
+          <h3>Controls</h3>
+          <div class="toggles">
+            <label class="select-row">Pitch keys
+              <select data-setting="pitchAviation">
+                <option value="true">Aviation: Up = nose down</option>
+                <option value="false">Direct: Up = nose up</option>
+              </select>
+            </label>
+            <label class="select-row">Throttle
+              <select data-setting="throttleMode">
+                <option value="manual">Manual: W/S move and hold the throttle</option>
+                <option value="arcade">Arcade: W/S set a target speed</option>
+              </select>
+            </label>
+            <label class="toggle"><input type="checkbox" data-setting="gamepadThrottleOnStick" /><span>Gamepad throttle on right stick <small>Accessible mode: right stick vertical is throttle.</small></span></label>
+          </div>
+          <h3>Key bindings</h3>
+          <p class="hint">Select an action, then press a key. Keys already in use swap places.</p>
+          <div class="bindings" id="bindings"></div>
+          <button type="button" class="btn btn--ghost" id="reset-bindings">Reset to defaults</button>
+          <h3>Display and sound</h3>
+          <div class="toggles">
+            <label class="select-row">Quality
+              <select data-setting="quality">
+                <option value="low">Low</option>
+                <option value="normal">Normal</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label class="toggle"><input type="checkbox" data-setting="reducedMotion" /><span>Reduced motion <small>Minimal camera shake, no replay depth of field.</small></span></label>
+            <label class="select-row">Volume <input type="range" min="0" max="1" step="0.05" data-setting="volume" /></label>
+          </div>
+          <p class="hint" id="quality-note" hidden>Quality changes apply after reload.</p>
+        </div>
+      </section>
+    </div>
+
+    <div id="fatal" class="overlay" hidden>
+      <section class="panel dialog dialog--small" role="alertdialog" aria-labelledby="fatal-title">
+        <h2 id="fatal-title">Flareway needs WebGL 2</h2>
+        <p id="fatal-text">This browser could not create a WebGL 2 context. Try a current Chrome, Edge, Firefox or Safari.</p>
+      </section>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -141,12 +141,10 @@ export const generateConditions = (preset: PresetId, seed: number): Conditions =
   }
 
   const distanceM = range(rng, 1.35, 1.5) * NM;
-  const rw = RUNWAYS[runway];
   const papiPastThreshold = RUNWAY.thresholdAbsX - RUNWAY.papiAbsX;
   const glideHeight = (distanceM + papiPastThreshold) * Math.tan((RUNWAY.glideDeg * Math.PI) / 180);
   const heightM = glideHeight + range(rng, 5, 15);
   const lateralM = range(rng, -12, 12);
-  void rw;
 
   return {
     code: encodeConditionCode(preset, seed),
