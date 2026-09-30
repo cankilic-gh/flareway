@@ -9,6 +9,7 @@ import {
   liftCoefficient,
   neutralInput,
   stepAircraft,
+  trimElevatorFor,
   type AircraftState,
   type ControlInput,
 } from '../../src/sim/physics';
@@ -164,5 +165,35 @@ describe('crosswind', () => {
     const z0 = s.pos.z;
     run(s, 6, { ...neutralInput(), throttle: 0.55 }, wind, noAssists);
     expect(Math.abs(s.pos.z - z0)).toBeLessThan(12);
+  });
+});
+
+describe('stability assist', () => {
+  it('re-trims for a flap change so the aircraft does not balloon', () => {
+    // Settle a trimmed glide with flaps 10, then compare holding flaps 10 against selecting flaps 20.
+    const settled = () => {
+      const s = airborne(34);
+      s.flapIndex = 1;
+      s.flapDeg = 10;
+      s.ias = 34;
+      s.alpha = 2 * DEG;
+      s.alphaHold = 2 * DEG;
+      s.trim = trimElevatorFor(2 * DEG, 10);
+      s.power = 0.45;
+      for (let i = 0; i < 120 * 30; i++) stepAircraft(s, { ...neutralInput(), throttle: 0.42, flaps: 1 }, defaultAssists(), calm, SIM_DT);
+      return s;
+    };
+    const fly = (flaps: number) => {
+      const s = settled();
+      const y0 = s.pos.y;
+      const v0 = s.ias;
+      for (let i = 0; i < 120 * 6; i++) stepAircraft(s, { ...neutralInput(), throttle: 0.42, flaps }, defaultAssists(), calm, SIM_DT);
+      return { dv: s.ias - v0, y: s.pos.y - y0 };
+    };
+    const hold = fly(1);
+    const flap = fly(2);
+    // Extra flap lift must not produce a climb: the altitude path stays close to the no-change path.
+    expect(flap.y - hold.y).toBeLessThan(6);
+    expect(Math.abs(flap.dv)).toBeLessThan(3);
   });
 });

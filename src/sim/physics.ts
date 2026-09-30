@@ -443,7 +443,12 @@ const approach = (current: number, target: number, rate: number, dt: number): nu
 export const stepAircraft = (s: AircraftState, input: ControlInput, assists: Assists, wind: WindField, dt: number): void => {
   // Flaps, engine.
   s.flapIndex = clamp(Math.round(input.flaps), 0, 3);
+  const prevFlapDeg = s.flapDeg;
   s.flapDeg = approach(s.flapDeg, AIRCRAFT.flapDetentsDeg[s.flapIndex]!, AIRCRAFT.flapRateDegPerSec, dt);
+  if (assists.pitchStability && s.flapDeg !== prevFlapDeg) {
+    // Re-trim for the flap change like a pilot would: keep the held lift coefficient so the aircraft does not balloon.
+    s.alphaHold -= (flapTable(AIRCRAFT.flapDeltaCl, s.flapDeg) - flapTable(AIRCRAFT.flapDeltaCl, prevFlapDeg)) / AIRCRAFT.clAlpha;
+  }
   let throttle = clamp(input.throttle, 0, 1);
   if (assists.autoThrottle) {
     const err = assists.autoThrottleTargetKt - s.ias / KT;

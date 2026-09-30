@@ -184,9 +184,19 @@ RED side of the loop.
 | E2E WebKit tutorial test | Safari does not tab to buttons and does not focus a clicked button, so focus was lost | Explicit focus cycling inside dialogs and explicit opener for focus return |
 | Mobile capture (375 px) | Setup panel covered the wordmark; HUD chips overlapped | Explicit grid rows on narrow screens, compact HUD placement |
 
+### Playtest finding: flap balloon under the stability assist
+
+A keyboard start in the production preview showed that one flap notch with no other input made the aircraft balloon
+(+280 fpm, 68 → 59 KIAS) because the assist held angle of attack while the flaps added lift. Test first:
+`tests/unit/flight.test.ts › re-trims for a flap change` compares holding 10° against selecting 20° from the same
+settled glide. RED with the assist unchanged: 13.2 m higher after 6 s. GREEN after the assist re-trims the held angle of
+attack by the flap lift increment (like a pilot re-trimming): under 6 m and speed within 3 kt. The autopilot sweep was
+re-run with identical results (calm 958 avg, 13 Butter), and a no-input run still fails (drift off the centerline or a
+hard arrival), so the game does not fly itself.
+
 ### Verification results
 
-- `npm run lint`: 0 problems. `npm run typecheck`: clean. `npm test`: 66/66 (Vitest).
+- `npm run lint`: 0 problems. `npm run typecheck`: clean. `npm test`: 67/67 (Vitest).
 - `npm run test:e2e`: 36/36 across Chromium (GPU new-headless) and WebKit, against the production build.
 - CI smoke (`CI=true npm run test:e2e:smoke`, SwiftShader): 1/1.
 - Performance (Apple M5, Normal, 2400×1350 buffer, GPU-synchronized): 5.7–8.5 ms per frame, ≤ 108 scene draw calls,

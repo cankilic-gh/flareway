@@ -69,7 +69,7 @@ The result screen shows the grade, the breakdown, touchdown metrics (fpm and m/s
 | Pause | `Esc` | Start |
 | Results: new conditions / replay | `N` / `P` | — |
 
-Keys ramp in: a tap is a small correction, a hold is full deflection. Every key is remappable in Settings (conflicts swap). Settings also offer pitch-key inversion ("Direct: Up = nose up"), the pitch stability assist, the coordinated-rudder assist, manual versus arcade throttle (arcade: `W`/`S` set a target speed), centerline guidance (extended centerline, deviation bar, PAPI repeater), the approach path marker (flight path vector and touchdown aim box), quality, volume and reduced motion. All assists are labeled in the HUD and can be switched off.
+Keys ramp in: a tap is a small correction, a hold is full deflection. Every key is remappable in Settings (conflicts swap). Settings also offer pitch-key inversion ("Direct: Up = nose up"), the pitch stability assist (holds the attitude you release at and re-trims for flap changes), the coordinated-rudder assist, manual versus arcade throttle (arcade: `W`/`S` set a target speed), centerline guidance (extended centerline, deviation bar, PAPI repeater), the approach path marker (flight path vector and touchdown aim box), quality, volume and reduced motion. All assists are labeled in the HUD and can be switched off.
 
 ## Architecture
 
