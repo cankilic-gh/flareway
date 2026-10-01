@@ -543,10 +543,17 @@ export class AirfieldView {
       dec ? softenCrown(mergeTemplate(dec, (m) => (m.name.includes('Trunk') ? trunk : crownDec))!, crownDec) : null,
       con ? softenCrown(mergeTemplate(con, (m) => (m.name.includes('Trunk') ? trunk : crownCon))!, crownCon, 0.45) : null,
     ];
-    const farDec = new IcosahedronGeometry(2.2, 0);
-    farDec.scale(1, 1.15, 1).translate(0, 5.2, 0);
-    const farCon = new ConeGeometry(2.1, 6.2, 6);
-    farCon.translate(0, 3.6, 0);
+    // Far LOD keeps the near templates' silhouettes: a lumpy round crown and a tall narrow cone.
+    const farDec = new IcosahedronGeometry(2.5, 1);
+    const fp = farDec.attributes['position'] as BufferAttribute;
+    for (let i = 0; i < fp.count; i++) {
+      const k = 0.85 + 0.3 * ((Math.sin(i * 12.9898) * 43758.5453) % 1 + 1) % 1;
+      fp.setXYZ(i, fp.getX(i) * k, fp.getY(i) * k * 0.9, fp.getZ(i) * k);
+    }
+    farDec.computeVertexNormals();
+    farDec.translate(0, 5.1, 0);
+    const farCon = new ConeGeometry(2.2, 6.4, 8);
+    farCon.translate(0, 4.1, 0);
     const farGeo = [softenCrown(colorize(farDec, crownDec), crownDec), softenCrown(colorize(farCon, crownCon), crownCon, 0.45)];
     if (dec) dec.visible = false;
     if (con) con.visible = false;

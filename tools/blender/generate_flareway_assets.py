@@ -26,6 +26,7 @@ for directory in (AIRCRAFT_GLB.parent, AIRFIELD_GLB.parent, BLEND_PATH.parent, R
 
 QUICK = "--quick" in sys.argv
 AIRCRAFT_ONLY = "--aircraft-only" in sys.argv
+AIRFIELD_ONLY = "--airfield-only" in sys.argv
 
 
 def clear_scene() -> None:
@@ -249,7 +250,7 @@ def control_panel(name: str, hinge_x: float, y0: float, y1: float, trail0: float
     return pivot
 
 
-def add_text_mesh(name: str, text: str, loc, size: float, rotation, col, mat, parent) -> bpy.types.Object:
+def add_text_mesh(name: str, text: str, loc, size: float, rotation, col, mat, parent, lowres: bool = False) -> bpy.types.Object:
     bpy.ops.object.text_add(location=loc, rotation=rotation)
     obj = bpy.context.object
     obj.name = name
@@ -258,7 +259,9 @@ def add_text_mesh(name: str, text: str, loc, size: float, rotation, col, mat, pa
     obj.data.align_y = "CENTER"
     obj.data.size = size
     obj.data.extrude = 0.006
-    obj.data.bevel_depth = 0.002
+    obj.data.bevel_depth = 0.0 if lowres else 0.002
+    if lowres:
+        obj.data.resolution_u = 3
     assign(obj, mat)
     move_to_collection(obj, col)
     parent_keep(obj, parent)
@@ -802,6 +805,227 @@ def build_aircraft(col, mats):
     return root
 
 
+def _hash(i: int, salt: int = 0) -> float:
+    h = math.sin(i * 12.9898 + salt * 78.233) * 43758.5453
+    return h - math.floor(h)
+
+
+def lumpy_lobe(name, center, radius, col, mat, parent, seed, squash=0.9, subdiv=1):
+    """Irregular leaf cluster: an icosphere with per-vertex radial noise (smooth shaded)."""
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=subdiv, radius=radius, location=center)
+    obj = bpy.context.object
+    obj.name = name
+    me = obj.data
+    for k, v in enumerate(me.vertices):
+        d = v.co.normalized()
+        n = 0.78 + 0.44 * _hash(k * 7 + seed, seed)
+        v.co = d * radius * n
+        v.co.z *= squash
+    for poly in me.polygons:
+        poly.use_smooth = True
+    assign(obj, mat)
+    move_to_collection(obj, col)
+    obj.parent = parent
+    return obj
+
+
+def tapered_trunk(name, base, top, r0, r1, col, mat, parent, segments=8, rings=4, bend=(0.0, 0.0)):
+    """A trunk or branch: tapered tube from base to top with a gentle bend."""
+    verts, faces = [], []
+    bx, by, bz = base
+    tx, ty, tz = top
+    for i in range(rings + 1):
+        t = i / rings
+        cx = bx + (tx - bx) * t + bend[0] * math.sin(math.pi * t)
+        cy = by + (ty - by) * t + bend[1] * math.sin(math.pi * t)
+        cz = bz + (tz - bz) * t
+        r = r0 + (r1 - r0) * t
+        for j in range(segments):
+            a = 2 * math.pi * j / segments
+            verts.append((cx + r * math.cos(a), cy + r * math.sin(a), cz))
+    for i in range(rings):
+        for j in range(segments):
+            a, b = i * segments + j, i * segments + (j + 1) % segments
+            faces.append((a, b, b + segments, a + segments))
+    faces.append(tuple(range(rings * segments, (rings + 1) * segments)))
+    return mesh_obj(name, verts, faces, col, mat, parent)
+
+
+def build_tree_templates(col, mats, props):
+    """Runtime instancing templates. Mesh names containing 'Trunk' are tinted as bark, the rest as foliage."""
+    bark, leaf = mats["roof"], mats["grass"]
+    deciduous = empty("TreeTemplate_Deciduous", col, (335, -78, 0), props)
+    tapered_trunk("Tree_Deciduous_Trunk", (0, 0, -0.2), (0.15, 0.05, 3.4), 0.30, 0.15, col, bark, deciduous, 9, 4, (0.12, 0.05))
+    branch_ends = []
+    for k, (ang, rise, reach) in enumerate(((0.3, 1.6, 1.6), (2.0, 1.9, 1.4), (3.6, 1.5, 1.7), (5.0, 2.1, 1.3))):
+        end = (0.15 + math.cos(ang) * reach, 0.05 + math.sin(ang) * reach, 3.2 + rise)
+        tapered_trunk(f"Tree_Deciduous_Trunk_Branch_{k}", (0.12, 0.04, 3.0), end, 0.12, 0.05, col, bark, deciduous, 6, 2,
+                      (0.0, 0.0))
+        branch_ends.append(end)
+    lobes = [((0.1, 0.0, 5.3), 1.85)]
+    for k, (x, y, z) in enumerate(branch_ends):
+        lobes.append(((x * 1.15, y * 1.15, z + 0.35), 1.25 + 0.25 * _hash(k, 3)))
+    for k in range(4):
+        a = k * 1.57 + 0.8
+        lobes.append(((math.cos(a) * 1.0, math.sin(a) * 1.0, 6.25 + 0.3 * _hash(k, 5)), 1.05 + 0.2 * _hash(k, 6)))
+    lobes.append(((0.6, -0.5, 4.2), 1.1))
+    lobes.append(((-0.7, 0.6, 4.4), 1.05))
+    for k, (c, r) in enumerate(lobes):
+        lumpy_lobe(f"Tree_Deciduous_Crown_{k}", c, r, col, leaf, deciduous, 11 + k * 17, subdiv=2 if k < 5 else 1)
+
+    conifer = empty("TreeTemplate_Conifer", col, (350, -82, 0), props)
+    tapered_trunk("Tree_Conifer_Trunk", (0, 0, -0.2), (0, 0, 7.4), 0.24, 0.04, col, bark, conifer, 8, 3)
+    tiers = 8
+    for t in range(tiers):
+        f = t / (tiers - 1)
+        z = 1.7 + f * 5.4
+        r = 2.25 * (1 - f * 0.82)
+        h = 1.25 - f * 0.45
+        spokes = 16
+        verts = [(0, 0, z + h)]
+        for ring_k, (frac, droop) in enumerate(((0.55, 0.25), (1.0, 0.55))):
+            for j in range(spokes):
+                a = 2 * math.pi * j / spokes + t * 0.4
+                jag = (1.0 if j % 2 == 0 else 0.84) if ring_k == 1 else 1.0
+                rr = r * frac * jag * (0.92 + 0.16 * _hash(j + t * 31 + ring_k * 7, 9))
+                verts.append((math.cos(a) * rr, math.sin(a) * rr, z + h * (1 - frac) - droop * h * frac))
+        verts.append((0, 0, z + 0.1 * h))
+        faces = []
+        inner, outer, bottom = 1, 1 + spokes, 1 + 2 * spokes
+        for j in range(spokes):
+            j2 = (j + 1) % spokes
+            faces.append((0, inner + j, inner + j2))
+            faces.append((inner + j, outer + j, outer + j2, inner + j2))
+            faces.append((bottom, outer + j2, outer + j))
+        mesh_obj(f"Tree_Conifer_Crown_{t + 1}", verts, faces, col, leaf, conifer)
+
+
+def join_named(objs, name):
+    """Join a list of mesh objects into one (fewer glTF nodes, smaller file)."""
+    objs = [o for o in objs if o and o.type == "MESH"]
+    if not objs:
+        return None
+    for o in objs:
+        for m in list(o.modifiers):
+            bpy.context.view_layer.objects.active = o
+            bpy.ops.object.modifier_apply(modifier=m.name)
+    bpy.ops.object.select_all(action="DESELECT")
+    for o in objs:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = objs[0]
+    bpy.ops.object.join()
+    objs[0].name = name
+    objs[0].select_set(False)
+    return objs[0]
+
+
+def corrugated_wall(prefix, x0, y0, x1, y1, z0, z1, pitch, col, mat, parent, out=(0.0, 0.0)):
+    """Vertical corrugation ribs along a wall line (x0,y0)-(x1,y1), pushed slightly outward."""
+    length = math.hypot(x1 - x0, y1 - y0)
+    n = max(2, int(length / pitch))
+    made = []
+    for k in range(n + 1):
+        t = k / n
+        x = x0 + (x1 - x0) * t + out[0]
+        y = y0 + (y1 - y0) * t + out[1]
+        sx = 0.05 if abs(x1 - x0) > abs(y1 - y0) else 0.06
+        sy = 0.06 if abs(x1 - x0) > abs(y1 - y0) else 0.05
+        made.append(cube(f"{prefix}_{k}", (x, y, (z0 + z1) / 2), (sx, sy, z1 - z0), col, mat, parent))
+    return join_named(made, prefix)
+
+
+def build_hangar(col, mats, root):
+    """Steel portal-frame hangar facing the runway: ribbed cladding, sliding doors, low-pitch seamed roof."""
+    cx, cy = 285.0, 88.0
+    W, D, H, RISE = 42.0, 28.0, 10.0, 3.6
+    front, back = cy - D / 2, cy + D / 2
+    siding, roofm, trim, door = mats["hangar"], mats["roof"], mats["trim"], mats["hangar_door"]
+    hangar = empty("Hangar", col, (0, 0, 0), root)
+    cube("HangarFooting", (cx, cy, 0.15), (W + 0.6, D + 0.6, 0.3), col, mats["concrete"], hangar)
+    cube("HangarBody", (cx, cy, H / 2), (W, D, H), col, siding, hangar)
+    # Gables above the door wall and the back wall (ridge runs front to back).
+    for gy, gname in ((front, "Front"), (back, "Back")):
+        verts = [(cx - W / 2, gy, H), (cx + W / 2, gy, H), (cx, gy, H + RISE)]
+        mesh_obj(f"HangarGable_{gname}", verts, [(0, 1, 2) if gname == "Front" else (0, 2, 1)], col, siding, hangar, smooth=False)
+    # Corrugation on the side and back walls, a clerestory window band on the sides.
+    corrugated_wall("HangarRibW", cx - W / 2, front, cx - W / 2, back, 0.3, H - 0.2, 0.75, col, siding, hangar, (-0.03, 0))
+    corrugated_wall("HangarRibE", cx + W / 2, front, cx + W / 2, back, 0.3, H - 0.2, 0.75, col, siding, hangar, (0.03, 0))
+    corrugated_wall("HangarRibN", cx - W / 2, back, cx + W / 2, back, 0.3, H - 0.2, 0.75, col, siding, hangar, (0, 0.03))
+    for sx in (-1, 1):
+        cube(f"HangarClerestory_{sx}", (cx + sx * (W / 2 + 0.06), cy, H - 1.6), (0.05, D - 3.0, 0.9), col, mats["window_dark"], hangar)
+        cube(f"HangarGutter_{sx}", (cx + sx * (W / 2 + 0.55), cy, H + 0.05), (0.22, D + 1.0, 0.18), col, trim, hangar)
+        for dy in (-D / 2 + 0.8, D / 2 - 0.8):
+            tube_between(f"HangarDownspout_{sx}_{dy}", (cx + sx * (W / 2 + 0.55), cy + dy, H), (cx + sx * (W / 2 + 0.2), cy + dy, 0.3), 0.07, col, trim, hangar)
+    # Roof: two seamed slabs with eaves, ridge cap.
+    half = W / 2 + 0.55
+    pitch = math.atan2(RISE, W / 2)
+    slope_len = half / math.cos(pitch)
+    for sx in (-1, 1):
+        ccx = cx + sx * half / 2
+        ccz = H + RISE - (half / 2) * math.tan(pitch) + 0.12
+        cube(f"HangarRoof_{sx}", (ccx, cy, ccz), (slope_len, D + 1.2, 0.22), col, roofm, hangar, rotation=(0, sx * pitch, 0))
+        seams = []
+        for k in range(int(D + 1)):
+            yy = front - 0.4 + k * 1.0 + 0.5
+            seams.append(cube(f"HangarSeam_{sx}_{k}", (ccx, yy, ccz + 0.13), (slope_len - 0.2, 0.06, 0.06), col, roofm, hangar, rotation=(0, sx * pitch, 0)))
+        for o in seams:
+            bpy.context.view_layer.objects.active = o
+            o.select_set(True)
+            bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
+            o.select_set(False)
+        join_named(seams, f"HangarSeams_{sx}")
+    cube("HangarRidge", (cx, cy, H + RISE + 0.25), (1.0, D + 1.3, 0.16), col, trim, hangar)
+    # Sliding doors on the runway face: six panels on a track, the middle pair parted to show the dark interior.
+    cube("HangarDoorOpening", (cx, front - 0.02, 4.6), (36.0, 0.05, 9.0), col, mats["window_dark"], hangar)
+    cube("HangarInterior", (cx, front + 3.0, 4.5), (35.0, 6.0, 9.0), col, mats["window_dark"], hangar)
+    cube("HangarDoorTrack", (cx, front - 0.35, 9.35), (W - 2.0, 0.35, 0.45), col, mats["dark_metal"], hangar)
+    panel_w = 6.2
+    xs = [-15.5, -9.3, -3.1, 3.1, 9.3, 15.5]
+    for k, px in enumerate(xs):
+        slide = (-2.4 if k == 2 else 2.4 if k == 3 else 0.0)
+        depth = front - (0.30 if k % 2 == 0 else 0.55)
+        if slide:
+            depth = front - 0.80
+        pxw = cx + px + slide
+        cube(f"HangarDoor_{k}", (pxw, depth, 4.55), (panel_w, 0.16, 9.0), col, door, hangar)
+        join_named([cube(f"HangarDoorRail_{k}_{z}", (pxw, depth - 0.09, z), (panel_w - 0.2, 0.05, 0.10), col, mats["dark_metal"], hangar)
+                    for z in (2.2, 4.4, 6.6)], f"HangarDoorRails_{k}")
+        cube(f"HangarDoorWindows_{k}", (pxw, depth - 0.09, 7.7), (panel_w - 0.8, 0.04, 0.8), col, mats["window_dark"], hangar)
+    # Personnel door, wall lights, and a fictional sign on the gable.
+    cube("HangarPersonnelDoor", (cx + W / 2 - 1.6, front - 0.04, 1.1), (1.0, 0.06, 2.2), col, trim, hangar)
+    cube("HangarPersonnelWindow", (cx + W / 2 - 1.6, front - 0.08, 1.6), (0.45, 0.03, 0.55), col, mats["window_dark"], hangar)
+    for lx in (-16, -6, 6, 16):
+        cube(f"HangarWallLight_{lx}", (cx + lx, front - 0.5, 9.9), (0.6, 0.35, 0.25), col, mats["white_light"], hangar)
+    cube("HangarSignBoard", (cx, front - 0.08, H + 1.3), (13.0, 0.10, 1.7), col, trim, hangar)
+    add_text_mesh("HangarSignText", "FLAREWAY AERO", (cx, front - 0.16, H + 1.3), 1.15, (math.pi / 2, 0, 0), col, mats["sign"], hangar, lowres=True)
+
+
+def build_flight_school(col, mats, root):
+    """Single-storey office beside the hangar: parapet roof, mullioned window band, canopy entrance, roof plant."""
+    cx, cy = 225.0, 90.0
+    W, D, H = 22.0, 12.0, 4.6
+    front = cy - D / 2
+    school = empty("FlightSchoolGroup", col, (0, 0, 0), root)
+    cube("FlightSchool", (cx, cy, H / 2), (W, D, H), col, mats["trim"], school)
+    cube("FlightSchoolPlinth", (cx, cy, 0.25), (W + 0.3, D + 0.3, 0.5), col, mats["concrete"], school)
+    cube("FlightSchoolParapet", (cx, cy, H + 0.3), (W + 0.3, D + 0.3, 0.6), col, mats["hangar"], school)
+    cube("FlightSchoolRoof", (cx, cy, H + 0.05), (W - 0.2, D - 0.2, 0.1), col, mats["roof"], school)
+    cube("FlightSchoolWindowBand", (cx - 2.0, front - 0.03, 2.4), (W - 7.0, 0.05, 1.6), col, mats["window_dark"], school)
+    for k in range(9):
+        cube(f"FlightSchoolMullion_{k}", (cx - 2.0 - (W - 7.0) / 2 + k * (W - 7.0) / 8, front - 0.07, 2.4), (0.10, 0.05, 1.7), col, mats["dark_metal"], school)
+    cube("FlightSchoolSill", (cx - 2.0, front - 0.1, 1.55), (W - 6.6, 0.18, 0.08), col, mats["concrete"], school)
+    cube("FlightSchoolEntry", (cx + W / 2 - 2.6, front - 0.03, 1.4), (2.2, 0.05, 2.8), col, mats["window_dark"], school)
+    cube("FlightSchoolEntryFrame", (cx + W / 2 - 2.6, front - 0.07, 1.4), (0.08, 0.05, 2.8), col, mats["dark_metal"], school)
+    cube("FlightSchoolCanopy", (cx + W / 2 - 2.6, front - 1.2, 3.1), (3.4, 2.4, 0.18), col, mats["hangar"], school)
+    for dx in (-1.5, 1.5):
+        tube_between(f"FlightSchoolCanopyPost_{dx}", (cx + W / 2 - 2.6 + dx, front - 2.2, 0.0), (cx + W / 2 - 2.6 + dx, front - 2.2, 3.0), 0.06, col, mats["dark_metal"], school)
+    for k, (dx, dy) in enumerate(((-6.0, 1.5), (-2.0, 2.0), (4.0, 1.0))):
+        cube(f"FlightSchoolACUnit_{k}", (cx + dx, cy + dy, H + 0.55), (1.6, 1.1, 0.9), col, mats["metal"], school)
+        cylinder(f"FlightSchoolACFan_{k}", (cx + dx, cy + dy, H + 1.02), 0.38, 0.04, col, mats["dark_metal"], school, vertices=16)
+    cube("FlightSchoolSignBoard", (cx - 2.0, front - 0.06, H - 0.55), (8.0, 0.06, 0.7), col, mats["hangar"], school)
+    add_text_mesh("FlightSchoolSignText", "FLIGHT SCHOOL", (cx - 2.0, front - 0.11, H - 0.55), 0.46, (math.pi / 2, 0, 0), col, mats["trim"], school, lowres=True)
+
+
 def build_airfield(col, mats):
     root = empty("AirfieldRoot", col)
     root["runwayDesignator"] = "09/27"
@@ -873,10 +1097,8 @@ def build_airfield(col, mats):
 
     # Apron, hangar, small terminal shed and signs.
     cube("Apron", (250, 62, -0.02), (150, 85, 0.10), col, mats["apron"], root)
-    cube("HangarBody", (285, 88, 7.0), (42, 28, 14), col, mats["hangar"], root, bevel=0.18)
-    # Roof halves.
-    cube("HangarRoof", (285, 88, 14.2), (45, 31, 1.0), col, mats["roof"], root, bevel=0.15, rotation=(0.18, 0, 0))
-    cube("FlightSchool", (225, 90, 3.0), (22, 12, 6), col, mats["hangar"], root, bevel=0.15)
+    build_hangar(col, mats, root)
+    build_flight_school(col, mats, root)
     cube("RunwaySign", (-360, 19, 0.65), (3.4, 0.25, 1.0), col, mats["sign"], root, bevel=0.06)
     add_text_mesh("RunwaySignText", "09-27", (-360, 18.86, 0.67), 0.52, (math.pi / 2, 0, 0), col, mats["marking"], root)
     for i in range(8):
@@ -891,18 +1113,7 @@ def build_airfield(col, mats):
 
     # Modular environment templates for runtime instancing.
     props = empty("AirfieldProps", col, parent=root)
-    deciduous = empty("TreeTemplate_Deciduous", col, (335, -78, 0), props)
-    cylinder("Tree_Deciduous_Trunk", (0, 0, 2.0), 0.26, 4.0, col, mats["roof"], deciduous, vertices=10)
-    sphere("Tree_Deciduous_Crown", (0, 0, 5.2), (2.1, 2.1, 2.5), col, mats["grass"], deciduous, 16, 8)
-    conifer = empty("TreeTemplate_Conifer", col, (350, -82, 0), props)
-    cylinder("Tree_Conifer_Trunk", (0, 0, 1.8), 0.22, 3.6, col, mats["roof"], conifer, vertices=10)
-    for index, (z, radius) in enumerate(((2.2, 2.2), (4.0, 1.7), (5.5, 1.1)), 1):
-        bpy.ops.mesh.primitive_cone_add(vertices=14, radius1=radius, radius2=0.12, depth=3.0, location=(0, 0, z))
-        crown = bpy.context.object
-        crown.name = f"Tree_Conifer_Crown_{index}"
-        assign(crown, mats["grass"])
-        move_to_collection(crown, col)
-        crown.parent = conifer
+    build_tree_templates(col, mats, props)
     # Perimeter fence module and rotating beacon landmark.
     fence = empty("FenceSegmentTemplate", col, (165, -52, 0), props)
     for y in (-4.0, 0.0, 4.0):
@@ -1048,6 +1259,10 @@ def main():
         "windsock": material("Windsock_Orange", (0.85, 0.16, 0.025, 1), 0.55),
         "hangar": material("Hangar_Siding", (0.32, 0.38, 0.40, 1), 0.68, 0.18),
         "roof": material("Roof_Metal", (0.15, 0.18, 0.20, 1), 0.48, 0.45),
+        "trim": material("Trim_White", (0.72, 0.72, 0.70, 1), 0.55),
+        "hangar_door": material("Hangar_Door", (0.46, 0.50, 0.52, 1), 0.52, 0.25),
+        "window_dark": material("Window_Dark", (0.012, 0.018, 0.024, 1), 0.12),
+        "concrete": material("Concrete_Footing", (0.30, 0.30, 0.29, 1), 0.9),
         "sign": material("Sign_Red", (0.40, 0.012, 0.012, 1), 0.48),
         "cone": material("Safety_Orange", (0.90, 0.22, 0.025, 1), 0.65),
         "studio": material("Studio_Ground", (0.095, 0.11, 0.13, 1), 0.78),
@@ -1056,7 +1271,8 @@ def main():
     airfield_root = build_airfield(airfield_col, mats)
 
     # Export before introducing QA-only transforms.
-    export_root(aircraft_root, AIRCRAFT_GLB)
+    if not AIRFIELD_ONLY:
+        export_root(aircraft_root, AIRCRAFT_GLB)
     if not AIRCRAFT_ONLY:
         export_root(airfield_root, AIRFIELD_GLB)
     bpy.ops.wm.save_as_mainfile(filepath=str(BLEND_PATH), compress=True)

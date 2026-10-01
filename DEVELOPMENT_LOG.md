@@ -295,3 +295,31 @@ Every runtime contract is unchanged: the 21 required node names, the gear, camer
 - GLB: 581 KB → 670 KB.
 - `npm run verify`: lint, typecheck, 73/73 unit tests and build.
 - `npm run test:e2e`: 36/36 (Chromium + WebKit), including binding, anchors, hinge corrections and control-surface animation.
+
+## 2026-10-01: trees, hangar and flight school brought to the FT-172 detail level
+
+User request: bring the trees and the hangar up to the quality of the revised aircraft. The generator gained `--airfield-only` (exports only the airfield GLB). The rest of the airfield is produced by unchanged code.
+
+- **Tree templates** (`build_tree_templates`):
+  - Deciduous: a tapered, slightly bent trunk with four branches, and eleven irregular leaf clusters at the branch ends and around the crown. The five largest use a finer subdivision.
+  - Conifer: a tapered trunk with eight whorled tiers, each a drooping two-ring needle skirt with a jagged rim.
+  - Mesh names keep the `Trunk` convention, so runtime tinting, crown softening and leaf-cluster noise apply unchanged.
+  - The far LOD in `airfieldView.ts` now matches the new silhouettes: a lumpy round crown and a tall eight-sided cone.
+- **Hangar** (`build_hangar`, 42 × 28 m, facing the runway):
+  - Concrete footing, ribbed cladding on the side and back walls, clerestory window bands, gutters and downspouts.
+  - Gable ends and a low-pitch roof with standing seams and a ridge cap.
+  - Six sliding door panels on an overhead track, rails and window strips, with the middle pair parted to show the dark interior.
+  - A personnel door, wall lights, and a fictional "FLAREWAY AERO" sign.
+- **Flight school** (`build_flight_school`): plinth, parapet roof, mullioned window band with sill, glass entry with a canopy on posts, rooftop AC units, and a "FLIGHT SCHOOL" sign.
+- **Size control.** Ribs and seams are joined into single meshes, and the new sign text uses low-resolution unbevelled curves.
+  - Field kit: 33.6 k → 39.1 k triangles, 1.13 → 1.47 MB.
+
+Short final, `CLM-00042` soft landing at 80 s, Apple M5:
+
+| | Before | After | Budget |
+|---|---|---|---|
+| scene triangles | 194 k | 323 k | 750 k |
+| near vegetation triangles | 61 k | 169 k | 250 k |
+
+- `npm run verify`: lint, typecheck, 73/73 unit tests and build.
+- `npm run test:e2e`: 36/36 (Chromium + WebKit).

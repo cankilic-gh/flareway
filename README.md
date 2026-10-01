@@ -133,8 +133,8 @@ The E2E suite builds and serves the production bundle and covers WebGL 2 boot, L
 
 | Asset | Runtime file | Budget |
 |---|---|---|
-| Flareway Trainer FT-172 | `public/assets/aircraft/ft172-trainer.glb` | 10,852 triangles, 14 materials, about 581 KB |
-| Island Runway 09/27 kit | `public/assets/airport/field-kit.glb` | 33,552 triangles, 19 materials, about 1.13 MB |
+| Flareway Trainer FT-172 | `public/assets/aircraft/ft172-trainer.glb` | 19,512 triangles, 15 materials, about 670 KB |
+| Island Runway 09/27 kit | `public/assets/airport/field-kit.glb` | 39,079 triangles, 23 materials, about 1.47 MB |
 | Editable source | `assets-src/blender/flareway-assets.blend` | Blender 5.2.1 LTS |
 
 Rebuild and inspect:
