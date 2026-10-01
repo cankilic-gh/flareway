@@ -25,6 +25,7 @@ for directory in (AIRCRAFT_GLB.parent, AIRFIELD_GLB.parent, BLEND_PATH.parent, R
     directory.mkdir(parents=True, exist_ok=True)
 
 QUICK = "--quick" in sys.argv
+AIRCRAFT_ONLY = "--aircraft-only" in sys.argv
 
 
 def clear_scene() -> None:
@@ -330,6 +331,190 @@ def build_island_terrain(col, mats, parent):
     return terrain
 
 
+# --- FT-172 v2 geometry helpers -------------------------------------------------------------------------
+# Proportions follow the published envelope of common four-seat high-wing trainers (8.28 m long, 11.0 m span,
+# ~1.1 m cabin width); every curve here is original and parametric.
+
+FUSELAGE_STATIONS = [
+    # x, half width, top z, bottom z, top exponent, bottom exponent (superellipse; higher = boxier)
+    (3.00, 0.29, 0.19, -0.22, 2.3, 2.3),
+    (2.92, 0.38, 0.25, -0.29, 2.5, 2.6),
+    (2.70, 0.45, 0.31, -0.34, 2.8, 3.0),
+    (2.30, 0.50, 0.35, -0.37, 3.0, 3.2),
+    (1.85, 0.53, 0.39, -0.41, 3.2, 3.4),
+    (1.55, 0.553, 0.45, -0.43, 3.4, 3.6),
+    (1.25, 0.565, 0.66, -0.45, 3.6, 3.8),
+    (0.98, 0.57, 0.88, -0.46, 3.8, 3.9),
+    (0.60, 0.575, 0.935, -0.46, 3.9, 3.9),
+    (-0.30, 0.575, 0.94, -0.455, 3.9, 3.9),
+    (-0.95, 0.56, 0.915, -0.40, 3.6, 3.6),
+    # Aft fuselage: straight top and bottom lines from the cabin to the tail, as on the type's side view.
+    (-1.50, 0.50, 0.855, -0.306, 3.2, 3.2),
+    (-2.10, 0.40, 0.79, -0.203, 3.0, 3.0),
+    (-2.80, 0.30, 0.713, -0.084, 2.8, 2.8),
+    (-3.50, 0.21, 0.637, 0.036, 2.6, 2.6),
+    (-4.20, 0.13, 0.56, 0.156, 2.4, 2.4),
+    (-4.75, 0.075, 0.50, 0.25, 2.2, 2.2),
+    (-4.98, 0.03, 0.48, 0.30, 2.0, 2.0),
+]
+RING = 40
+
+
+def station_at(x: float):
+    st = FUSELAGE_STATIONS
+    if x >= st[0][0]:
+        return st[0]
+    if x <= st[-1][0]:
+        return st[-1]
+    for a, b in zip(st, st[1:]):
+        if b[0] <= x <= a[0]:
+            t = (a[0] - x) / (a[0] - b[0])
+            return tuple(a[k] + (b[k] - a[k]) * t for k in range(6))
+    return st[-1]
+
+
+def skin_point(x: float, t: float, offset: float = 0.0):
+    """Point on the fuselage skin at station x and section angle t (0 = port side, pi/2 = top)."""
+    _, w, zt, zb, nt, nb = station_at(x)
+    zc, h = (zt + zb) / 2, (zt - zb) / 2
+    c, s_ = math.cos(t), math.sin(t)
+    n = nt if s_ >= 0 else nb
+    y = w * math.copysign(abs(c) ** (2 / n), c)
+    z = zc + h * math.copysign(abs(s_) ** (2 / n), s_)
+    if offset:
+        d = Vector((0.0, y, (z - zc) * (w / max(h, 1e-3)))).normalized()
+        y += d.y * offset
+        z += d.z * offset
+    return (x, y, z)
+
+
+def fuselage_v2(name, col, mat, parent):
+    verts, faces = [], []
+    xs = [st[0] for st in FUSELAGE_STATIONS]
+    for x in xs:
+        for j in range(RING):
+            verts.append(skin_point(x, 2 * math.pi * j / RING))
+    for i in range(len(xs) - 1):
+        for j in range(RING):
+            a, b = i * RING + j, i * RING + (j + 1) % RING
+            faces.append((a, b, b + RING, a + RING))
+    faces.append(tuple(range(RING - 1, -1, -1)))
+    last = (len(xs) - 1) * RING
+    faces.append(tuple(last + j for j in range(RING)))
+    obj = mesh_obj(name, verts, faces, col, mat, parent)
+    sub = obj.modifiers.new("Smooth", "SUBSURF")
+    sub.levels = 1
+    sub.render_levels = 1
+    return obj
+
+
+def skin_patch(name, x0, x1, t0, t1, offset, col, mat, parent, nx=10, nt=8):
+    """A panel that follows the fuselage skin between two stations and two section angles."""
+    verts, faces = [], []
+    for i in range(nx + 1):
+        x = x0 + (x1 - x0) * i / nx
+        for j in range(nt + 1):
+            verts.append(skin_point(x, t0 + (t1 - t0) * j / nt, offset))
+    for i in range(nx):
+        for j in range(nt):
+            a = i * (nt + 1) + j
+            faces.append((a, a + nt + 1, a + nt + 2, a + 1))
+    return mesh_obj(name, verts, faces, col, mat, parent)
+
+
+def skin_patch_sym(name, x0, x1, t0, t1, offset, col, mat, parent, **kw):
+    skin_patch(f"{name}_L", x0, x1, t0, t1, offset, col, mat, parent, **kw)
+    skin_patch(f"{name}_R", x0, x1, math.pi - t1, math.pi - t0, offset, col, mat, parent, **kw)
+
+
+def naca(m: float, p: float, t: float, n: int = 14):
+    """Closed NACA 4-digit profile (x/c from 1 over the top to 0 and back under), cosine spaced."""
+    xs = [0.5 * (1 - math.cos(math.pi * i / n)) for i in range(n + 1)]
+    upper, lower = [], []
+    for x in xs:
+        yt = 5 * t * (0.2969 * math.sqrt(x) - 0.1260 * x - 0.3516 * x * x + 0.2843 * x ** 3 - 0.1036 * x ** 4)
+        if m and x < p:
+            yc, dy = m / p ** 2 * (2 * p * x - x * x), 2 * m / p ** 2 * (p - x)
+        elif m:
+            yc, dy = m / (1 - p) ** 2 * ((1 - 2 * p) + 2 * p * x - x * x), 2 * m / (1 - p) ** 2 * (p - x)
+        else:
+            yc, dy = 0.0, 0.0
+        th = math.atan(dy)
+        upper.append((x - yt * math.sin(th), yc + yt * math.cos(th)))
+        lower.append((x + yt * math.sin(th), yc - yt * math.cos(th)))
+    return list(reversed(upper)) + lower[1:]
+
+
+def clip_profile(profile, x_from: float, x_to: float):
+    """Keep the part of a closed profile between two chord fractions (straight cut faces)."""
+    out = []
+    n = len(profile)
+    for i in range(n):
+        a, b = profile[i], profile[(i + 1) % n]
+        ina, inb = x_from <= a[0] <= x_to, x_from <= b[0] <= x_to
+        if ina:
+            out.append(a)
+        if ina != inb:
+            for edge in (x_from, x_to):
+                if (a[0] - edge) * (b[0] - edge) < 0:
+                    k = (edge - a[0]) / (b[0] - a[0])
+                    out.append((edge, a[1] + (b[1] - a[1]) * k))
+    return out
+
+
+def airfoil_part(m: float, p: float, t: float, x0: float, x1: float, n: int = 12):
+    """Closed polygon of a NACA 4-digit section between chord fractions x0..x1, always 2n points.
+
+    Upper surface from x1 forward to x0, then lower surface back to x1. A fixed point count lets lofts blend
+    sections with different cut positions (tapered wings) without twisting.
+    """
+    def surf(x):
+        x = min(max(x, 0.0), 1.0)
+        yt = 5 * t * (0.2969 * math.sqrt(x) - 0.1260 * x - 0.3516 * x * x + 0.2843 * x ** 3 - 0.1036 * x ** 4)
+        if m == 0:
+            yc = 0.0
+        elif x < p:
+            yc = m / p ** 2 * (2 * p * x - x * x)
+        else:
+            yc = m / (1 - p) ** 2 * ((1 - 2 * p) + 2 * p * x - x * x)
+        return yc + yt, yc - yt
+    xs = [x0 + (x1 - x0) * 0.5 * (1 - math.cos(math.pi * i / (n - 1))) for i in range(n)]
+    upper = [(x, surf(x)[0]) for x in reversed(xs)]
+    lower = [(x, surf(x)[1]) for x in xs]
+    if x0 <= 1e-6:
+        lower = lower[1:] + [(x1, surf(x1)[1] - 1e-4)]
+    return upper + lower
+
+
+def surface_loft(name, sections, col, mat, parent, axis="y", smooth=True, cap=True):
+    """Loft closed 2D profiles placed along an axis. Each section: (station, [(u, v), ...]) in world units.
+
+    axis 'y': u -> x, v -> z (wings, stabilizers); axis 'z': u -> x, v -> y (fin, rudder).
+    """
+    count = len(sections[0][1])
+    verts, faces = [], []
+    for station, pts in sections:
+        for u, v in pts:
+            verts.append((u, station, v) if axis == "y" else (u, v, station))
+    for i in range(len(sections) - 1):
+        for j in range(count):
+            a, b = i * count + j, i * count + (j + 1) % count
+            faces.append((a, b, b + count, a + count))
+    if cap:
+        faces.append(tuple(range(count - 1, -1, -1)))
+        last = (len(sections) - 1) * count
+        faces.append(tuple(last + j for j in range(count)))
+    obj = mesh_obj(name, verts, faces, col, mat, parent, smooth=smooth)
+    wn = obj.modifiers.new("Normals", "WEIGHTED_NORMAL")
+    wn.keep_sharp = True
+    return obj
+
+
+def place_profile(profile, le_x: float, chord: float, z: float, scale_t: float = 1.0, origin_x: float = 0.0):
+    """Profile x/c runs forward-to-aft; aircraft +X is forward, so x = le_x - u * chord."""
+    return [(le_x - u * chord - origin_x, z + v * chord * scale_t) for u, v in profile]
+
+
 def build_aircraft(col, mats):
     root = empty("AircraftRoot", col)
     root["assetName"] = "Flareway Trainer FT-172"
@@ -337,152 +522,275 @@ def build_aircraft(col, mats):
     root["lengthM"] = 8.28
     root["wingspanM"] = 11.0
     root["originalLogoFree"] = True
+    root["revision"] = 2
 
-    stations = [
-        (2.95, 0.07, 0.07, 0.04), (2.82, 0.34, 0.30, 0.02), (2.48, 0.56, 0.44, 0.02),
-        (2.02, 0.68, 0.54, 0.04), (1.35, 0.73, 0.66, 0.08), (0.45, 0.77, 0.72, 0.10),
-        (-0.55, 0.77, 0.72, 0.10), (-1.35, 0.69, 0.62, 0.13), (-2.20, 0.50, 0.45, 0.20),
-        (-3.15, 0.33, 0.32, 0.27), (-4.15, 0.18, 0.20, 0.33), (-4.78, 0.08, 0.11, 0.35),
-        (-4.98, 0.022, 0.035, 0.36),
-    ]
-    fuselage_loft("Fuselage", stations, col, mats["white"], root)
-    cube("CabinRoof", (0.08, 0, 0.73), (2.20, 1.48, 0.24), col, mats["white"], root, bevel=0.16)
+    W, ACC, DARK, MET = mats["white"], mats["accent"], mats["rubber"], mats["metal"]
 
-    # Cowling seams, exhaust, spinner and propeller.
-    torus("CowlingSeam", (2.55, 0, 0.04), 0.43, 0.008, col, mats["rubber"], root, rotation=(0, math.pi / 2, 0))
-    tube_between("Exhaust", (2.05, -0.42, -0.28), (1.83, -0.46, -0.40), 0.026, col, mats["dark_metal"], root)
-    prop = empty("Propeller", col, (3.09, 0, 0.04), root)
+    # Fuselage shell: boxy superellipse sections, deep cabin, tapering tail cone.
+    fuselage_v2("Fuselage", col, W, root)
+
+    # Cowling: front face with two intakes beside the spinner, seams, exhaust and oil door.
+    for sign in (1, -1):
+        sphere(f"CowlIntake_{sign}", (3.0, sign * 0.17, 0.02), (0.035, 0.11, 0.075), col, DARK, root, 20, 10)
+        tube_between(f"Exhaust_{sign}", (2.18, sign * 0.30, -0.36), (1.98, sign * 0.33, -0.47), 0.025, col, mats["dark_metal"], root)
+    skin_patch_sym("CowlSeam", 2.10, 2.13, -1.2, 1.2, 0.002, col, DARK, root, nx=1, nt=8)
+    skin_patch("OilDoor", 2.55, 2.25, 1.35, 1.75, 0.002, col, DARK, root, nx=2, nt=2)
+
+    # Windshield, side and rear glazing follow the skin; a darker gasket sits just under each pane.
+    for gname, x0, x1, t0, t1 in (("Windshield", 1.53, 0.99, 0.30, math.pi - 0.30), ("RearWindow", -0.98, -1.58, 0.95, math.pi - 0.95)):
+        skin_patch(f"{gname}_Gasket", x0 + 0.02, x1 - 0.02, t0 - 0.03, t1 + 0.03, 0.004, col, DARK, root, nx=10, nt=14)
+        skin_patch(gname, x0, x1, t0, t1, 0.016, col, mats["glass"], root, nx=10, nt=14)
+    for wname, x0, x1, t0, t1 in (("CabinWindow_Front", 0.93, 0.02, 0.16, 0.98), ("CabinWindow_Rear", -0.08, -0.88, 0.18, 0.92)):
+        skin_patch_sym(f"{wname}_Gasket", x0 + 0.025, x1 - 0.025, t0 - 0.04, t1 + 0.04, 0.004, col, DARK, root, nx=8, nt=6)
+        skin_patch_sym(wname, x0, x1, t0, t1, 0.016, col, mats["glass"], root, nx=8, nt=6)
+    # Door outlines and handles.
+    for dx in (0.97, -0.03):
+        skin_patch_sym(f"DoorSeam_{dx}", dx + 0.006, dx - 0.006, -0.95, 1.05, 0.003, col, DARK, root, nx=1, nt=10)
+    skin_patch_sym("DoorSeamBottom", 0.97, -0.03, -0.96, -0.92, 0.003, col, DARK, root, nx=6, nt=1)
+    for sign in (1, -1):
+        p = skin_point(0.16, 0.0 if sign > 0 else math.pi, 0.012)
+        cube(f"DoorHandle_{sign}", (p[0], p[1], 0.36), (0.17, 0.03, 0.03), col, mats["dark_metal"], root, bevel=0.01)
+
+    # Original livery: a cyan sweep with a charcoal pinstripe along each side, and a cyan band on the fin.
+    skin_patch_sym("Livery_Cyan", 2.85, -4.85, -0.42, -0.26, 0.004, col, ACC, root, nx=40, nt=2)
+    skin_patch_sym("Livery_Dark", 2.80, -4.80, -0.22, -0.18, 0.004, col, DARK, root, nx=40, nt=1)
+
+    # Spinner and two twisted, tapered blades with painted tips.
+    prop = empty("Propeller", col, (3.09, 0, 0.02), root)
     prop["runtimeAxis"] = "X"
     prop["maxRpm"] = 2700
-    bpy.ops.mesh.primitive_cone_add(vertices=32, radius1=0.24, radius2=0.04, depth=0.42,
-                                    location=(0.0, 0.0, 0.0), rotation=(0, math.pi / 2, 0))
-    spinner = bpy.context.object
-    spinner.name = "Propeller_Spinner"
-    assign(spinner, mats["metal"])
-    move_to_collection(spinner, col)
-    spinner.parent = prop
-    blade_verts = [(-0.025, 0.10, -0.07), (0.025, 0.10, -0.07), (-0.018, 0.76, -0.035), (0.018, 0.76, -0.035),
-                   (-0.025, 0.10, 0.07), (0.025, 0.10, 0.07), (-0.018, 0.76, 0.035), (0.018, 0.76, 0.035)]
-    blade_faces = [(0, 2, 3, 1), (4, 5, 7, 6), (0, 1, 5, 4), (2, 6, 7, 3), (0, 4, 6, 2), (1, 3, 7, 5)]
-    for index, angle in enumerate((0.20, math.pi + 0.20), 1):
-        blade = mesh_obj(f"Propeller_Blade_{index}", blade_verts, blade_faces, col, mats["prop"], prop, smooth=False)
-        blade.rotation_euler.x = angle
-        bevel = blade.modifiers.new("BladeEdges", "BEVEL")
-        bevel.width = 0.018
-        bevel.segments = 2
+    spin_sections = []
+    for k, (dx, r) in enumerate(((-0.10, 0.22), (0.0, 0.215), (0.10, 0.19), (0.20, 0.14), (0.28, 0.075), (0.32, 0.02))):
+        spin_sections.append((dx, [(r * math.cos(2 * math.pi * j / 24), r * math.sin(2 * math.pi * j / 24)) for j in range(24)]))
+    sverts, sfaces = [], []
+    for dx, ring in spin_sections:
+        for y, z in ring:
+            sverts.append((dx, y, z))
+    for i in range(len(spin_sections) - 1):
+        for j in range(24):
+            a, b = i * 24 + j, i * 24 + (j + 1) % 24
+            sfaces.append((a, b, b + 24, a + 24))
+    sfaces.append(tuple(range(23, -1, -1)))
+    last = (len(spin_sections) - 1) * 24
+    sfaces.append(tuple(last + j for j in range(24)))
+    mesh_obj("Propeller_Spinner", sverts, sfaces, col, MET, prop)
+    blade_profile = naca(0.04, 0.4, 0.12, 8)
+    for index, base in enumerate((0.0, math.pi), 1):
+        sections = []
+        for r, chord, twist in ((0.16, 0.13, 0.62), (0.30, 0.16, 0.48), (0.55, 0.15, 0.32), (0.80, 0.12, 0.22), (0.92, 0.09, 0.18), (0.96, 0.05, 0.16)):
+            pts = []
+            for u, v in blade_profile:
+                lu, lv = (0.35 - u) * chord, v * chord
+                pts.append((lu * math.cos(twist) - lv * math.sin(twist), lu * math.sin(twist) + lv * math.cos(twist)))
+            sections.append((r, pts))
+        verts, faces = [], []
+        n = len(blade_profile)
+        for r, pts in sections:
+            for a_, b_ in pts:
+                # Blade axis along +Y before rotation: chord in X-Z.
+                verts.append((b_, r, a_))
+        for i in range(len(sections) - 1):
+            for j in range(n):
+                a, b = i * n + j, i * n + (j + 1) % n
+                faces.append((a, b, b + n, a + n))
+        faces.append(tuple(range(n - 1, -1, -1)))
+        last = (len(sections) - 1) * n
+        faces.append(tuple(last + j for j in range(n)))
+        blade = mesh_obj(f"Propeller_Blade_{index}", verts, faces, col, mats["prop"], prop)
+        blade.rotation_euler.x = base
+        tip = cube(f"Propeller_Tip_{index}", (0.0, 0.89, 0.0), (0.03, 0.12, 0.10), col, mats["tip"], prop, bevel=0.012)
+        tip.rotation_euler = (base, 0.0, 0.0)
+        tip.location = (0.0, 0.89 * math.cos(base), 0.89 * math.sin(base))
 
-    # Wing: static leading structure plus movable flaps and ailerons.
+    # Wing: NACA 2412, constant chord inboard, tapering outboard, 1.7 deg dihedral, rounded tips.
+    # The control surfaces share a straight hinge line at x = -0.68 so they rotate about the span axis.
+    HINGE_X, CTRL_CHORD = -0.68, 0.42
     wing_root = empty("WingStatic", col, (0, 0, 0), root)
     wing_root["spanM"] = 11.0
-    wing_panel("Wing_Center", -0.82, 0.82, 0.72, -0.68, 0.72, -0.68, 0.82, 0.82, 0.20, 0.20, col, mats["white"], wing_root)
-    for sign, side in ((1, "L"), (-1, "R")):
-        y0, y1 = sign * 0.82, sign * 5.50
-        wing_panel(f"Wing_{side}_Forward", y0, y1, 0.72, -0.69, 0.48, -0.55, 0.82, 0.95, 0.20, 0.12, col, mats["white"], wing_root)
-        # Flaps inner, ailerons outer. Port is positive Blender Y.
-        control_panel(f"Flap_{side}", -0.68, sign * 0.86, sign * 3.18, -1.15, -1.02, 0.80, 0.87, 0.09,
-                      col, mats["white"], root, "Z")
-        control_panel(f"Aileron_{side}", -0.58, sign * 3.20, sign * 5.35, -1.02, -0.88, 0.87, 0.93, 0.07,
-                      col, mats["white"], root, "Z")
-        # Wing struts.
-        tube_between(f"WingStrut_{side}_Front", (0.28, sign * 0.63, -0.06), (0.08, sign * 3.30, 0.89), 0.035, col, mats["metal"], root)
-        tube_between(f"WingStrut_{side}_Rear", (-0.55, sign * 0.63, -0.08), (-0.48, sign * 3.10, 0.87), 0.028, col, mats["metal"], root)
+    prof = naca(0.02, 0.4, 0.12, 16)
 
-    # Horizontal tail and elevator.
-    tail_static = empty("TailStatic", col, parent=root)
+    def chord_at(y):
+        a = abs(y)
+        return 1.72 if a <= 2.6 else 1.72 - (a - 2.6) / (5.42 - 2.6) * 0.52
+
+    def z_at(y):
+        return 0.985 + abs(y) * math.tan(math.radians(1.7))
+
+    def fixed_section(y, scale_t=1.0, chord_scale=1.0):
+        c = chord_at(y) * chord_scale
+        te = HINGE_X - CTRL_CHORD
+        le = te + c
+        frac = (le - HINGE_X) / c
+        return (y, place_profile(airfoil_part(0.02, 0.4, 0.12, 0.0, frac, 14), le, c, z_at(y), scale_t))
+
+    span_ys = [0.0, 0.58, 1.6, 2.6, 3.6, 4.6, 5.30, 5.42]
+    sections = [fixed_section(-y) for y in reversed(span_ys[1:])] + [fixed_section(y) for y in span_ys]
+    surface_loft("Wing_Main", [(y, pts) for y, pts in sections], col, W, wing_root)
     for sign, side in ((1, "L"), (-1, "R")):
-        wing_panel(f"Stabilizer_{side}", sign * 0.10, sign * 1.85, -3.46, -4.14, -3.62, -4.18,
-                   0.48, 0.54, 0.10, 0.065, col, mats["white"], tail_static)
-    elevator = empty("Elevator", col, (-4.14, 0, 0), root)
+        # Rounded tip cap: shrinking profiles past the last station.
+        tip = [fixed_section(sign * 5.42)]
+        for k, (dy, sc) in enumerate(((0.05, 0.85), (0.09, 0.6), (0.11, 0.3))):
+            y = sign * (5.42 + dy)
+            c = chord_at(5.42)
+            te = HINGE_X - CTRL_CHORD
+            le = te + c
+            frac = (le - HINGE_X) / c
+            tip.append((y, place_profile(airfoil_part(0.02, 0.4, 0.12, 0.0, frac, 14), le - (1 - sc) * 0.05, c - (1 - sc) * 0.10, z_at(5.42) - 0.015 * (1 - sc), sc)))
+        if sign < 0:
+            tip = list(reversed(tip))
+        surface_loft(f"WingTip_{side}", tip, col, W, wing_root)
+        # Fuel caps, nav light, pitot (port), landing light lens in the leading edge (port).
+        cylinder(f"FuelCap_{side}", (0.30, sign * 1.25, z_at(1.25) + 0.11), 0.045, 0.02, col, MET, wing_root, vertices=16)
+        sphere(f"NavLight_{'Port' if sign > 0 else 'Starboard'}", (0.15, sign * 5.53, z_at(5.42)), (0.08, 0.04, 0.035), col,
+               mats["red_light"] if sign > 0 else mats["green_light"], root, 16, 8)
+    tube_between("PitotTube", (0.20, 3.95, z_at(3.95) - 0.06), (0.62, 3.95, z_at(3.95) - 0.07), 0.009, col, mats["dark_metal"], root)
+    sphere("LandingLight", (0.85, 2.0, z_at(2.0)), (0.03, 0.12, 0.05), col, mats["white_light"], root, 16, 8)
+
+    def control_surface(name, y0, y1, mat_):
+        pivot = empty(name, col, (HINGE_X, 0.0, 0.0), root)
+        pivot["runtimeHingeAxis"] = "Z"
+        pivot["maxDeflectionDeg"] = 20.0 if "Aileron" in name else 30.0
+        secs = []
+        for y in (y0, y1):
+            c = chord_at(y)
+            te = HINGE_X - CTRL_CHORD
+            le = te + c
+            frac = (le - HINGE_X) / c
+            secs.append((y, place_profile(airfoil_part(0.02, 0.4, 0.12, frac + 0.006, 1.0, 8), le, c, z_at(y), 1.0, origin_x=HINGE_X)))
+        if y1 < y0:
+            secs = list(reversed(secs))
+        surface_loft(f"{name}_Surface", secs, col, mat_, pivot, smooth=False)
+        return pivot
+
+    for sign, side in ((1, "L"), (-1, "R")):
+        control_surface(f"Flap_{side}", sign * 0.60, sign * 3.12, W)
+        control_surface(f"Aileron_{side}", sign * 3.16, sign * 5.30, W)
+        # One faired strut per side from the lower fuselage to the wing.
+        a = (0.06, sign * 0.52, -0.37)
+        b = (0.12, sign * 2.95, z_at(2.95) - 0.08)
+        strut = tube_between(f"WingStrut_{side}", a, b, 0.05, col, W, root, vertices=12)
+        strut.scale = (1.0, 0.36, 1.0)
+        cube(f"StrutFairing_{side}", (0.10, sign * 2.95, z_at(2.95) - 0.07), (0.30, 0.10, 0.06), col, W, root, bevel=0.03)
+
+    # Horizontal tail: low on the tail cone, symmetric section, elevator on a straight hinge.
+    tail_static = empty("TailStatic", col, parent=root)
+    ELEV_HINGE = -4.12
+    sprof = naca(0.0, 0.4, 0.10, 12)
+
+    def stab_chord(y):
+        a = abs(y)
+        return 1.38 if a <= 1.2 else 1.38 - (a - 1.2) / (1.74 - 1.2) * 0.42
+
+    def stab_section(y, scale=1.0):
+        c = stab_chord(y)
+        le = ELEV_HINGE + (c - 0.52)
+        frac = (le - ELEV_HINGE) / c
+        return (y, place_profile(airfoil_part(0.0, 0.4, 0.10, 0.0, frac, 12), le, c, 0.28, scale))
+
+    stab_ys = [0.0, 0.6, 1.2, 1.6, 1.74]
+    secs = [stab_section(-y) for y in reversed(stab_ys[1:])] + [stab_section(y) for y in stab_ys]
+    surface_loft("Stabilizer", secs, col, W, tail_static)
+    elevator = empty("Elevator", col, (ELEV_HINGE, 0, 0), root)
     elevator["runtimeHingeAxis"] = "Z"
     elevator["maxDeflectionDeg"] = 25.0
     for sign, side in ((1, "L"), (-1, "R")):
-        child = wing_panel(f"Elevator_{side}_Surface", sign * 0.10, sign * 1.78, 0.0, -0.55, 0.0, -0.48,
-                           0.48, 0.54, 0.07, 0.05, col, mats["white"], elevator)
+        es = []
+        for y in (sign * 0.12, sign * 1.70):
+            c = stab_chord(y)
+            le = ELEV_HINGE + (c - 0.52)
+            frac = (le - ELEV_HINGE) / c
+            es.append((y, place_profile(airfoil_part(0.0, 0.4, 0.10, frac + 0.006, 1.0, 8), le, c, 0.28, 1.0, origin_x=ELEV_HINGE)))
+        if sign < 0:
+            es = list(reversed(es))
+        surface_loft(f"Elevator_{side}_Surface", es, col, W, elevator, smooth=False)
 
-    # Vertical stabilizer and rudder, thin along Y.
-    verts = [(-3.30, -0.045, 0.36), (-4.42, -0.035, 0.36), (-4.05, -0.025, 1.64), (-3.45, -0.025, 1.26),
-             (-3.30, 0.045, 0.36), (-4.42, 0.035, 0.36), (-4.05, 0.025, 1.64), (-3.45, 0.025, 1.26)]
-    faces = [(0, 1, 2, 3), (4, 7, 6, 5), (0, 4, 5, 1), (1, 5, 6, 2), (2, 6, 7, 3), (3, 7, 4, 0)]
-    mesh_obj("VerticalStabilizer", verts, faces, col, mats["white"], root, smooth=False)
-    rudder = empty("Rudder", col, (-4.03, 0, 0.41), root)
+    # Vertical tail: swept fin with a dorsal fillet, rudder on a vertical hinge.
+    RUDDER_HINGE = -4.34
+    fprof = naca(0.0, 0.4, 0.10, 12)
+    fin_secs = []
+    for z, le in ((0.55, -2.95), (0.70, -3.30), (1.00, -3.60), (1.35, -3.85), (1.62, -4.02)):
+        c = le - RUDDER_HINGE
+        pts = [(le - u * c, v * c) for u, v in fprof]
+        fin_secs.append((z, pts))
+    surface_loft("VerticalStabilizer", fin_secs, col, W, root, axis="z")
+    dsecs = []
+    for z, le in ((0.60, -2.25), (0.78, -2.85), (0.96, -3.38)):
+        te = -3.95
+        c = le - te
+        dsecs.append((z, [(le - u * c, v * c * 0.55) for u, v in fprof]))
+    surface_loft("DorsalFin", dsecs, col, W, root, axis="z")
+    rudder = empty("Rudder", col, (RUDDER_HINGE, 0, 0.36), root)
     rudder["runtimeHingeAxis"] = "Y"
     rudder["maxDeflectionDeg"] = 28.0
-    rverts = [(0, -0.035, 0), (-0.55, -0.025, -0.05), (-0.30, -0.020, 1.15), (0.0, -0.025, 1.23),
-              (0, 0.035, 0), (-0.55, 0.025, -0.05), (-0.30, 0.020, 1.15), (0.0, 0.025, 1.23)]
-    mesh_obj("Rudder_Surface", rverts, faces, col, mats["accent"], rudder, smooth=False)
+    rprof = naca(0.0, 0.4, 0.09, 10)
+    rsecs = []
+    for z, chord in ((0.0, 0.62), (0.6, 0.56), (1.10, 0.46), (1.30, 0.30)):
+        pts = [(-u * chord, v * chord * 0.8) for u, v in rprof]
+        rsecs.append((z, pts))
+    surface_loft("Rudder_Surface", rsecs, col, ACC, rudder, axis="z")
+    sphere("Beacon", (-4.12, 0, 1.66), (0.05, 0.035, 0.05), col, mats["red_light"], root, 16, 8)
 
-    # Cabin glazing and doors.
-    cube("Windshield", (1.20, 0, 0.54), (0.055, 1.30, 0.62), col, mats["glass"], root, bevel=0.04, rotation=(0, -0.28, 0))
-    tube_between("WindshieldFrame_Top", (1.11, -0.67, 0.84), (1.11, 0.67, 0.84), 0.018, col, mats["rubber"], root)
-    tube_between("WindshieldFrame_Bottom", (1.28, -0.67, 0.25), (1.28, 0.67, 0.25), 0.018, col, mats["rubber"], root)
-    tube_between("WindshieldFrame_L", (1.11, 0.67, 0.84), (1.28, 0.67, 0.25), 0.018, col, mats["rubber"], root)
-    tube_between("WindshieldFrame_R", (1.11, -0.67, 0.84), (1.28, -0.67, 0.25), 0.018, col, mats["rubber"], root)
-    for sign, side in ((1, "L"), (-1, "R")):
-        cube(f"CabinWindow_{side}_Front", (0.42, sign * 0.765, 0.49), (0.90, 0.035, 0.47), col, mats["glass"], root, bevel=0.06)
-        cube(f"CabinWindow_{side}_Rear", (-0.57, sign * 0.765, 0.47), (0.82, 0.035, 0.43), col, mats["glass"], root, bevel=0.06)
-        y_frame = sign * 0.792
-        for frame_name, a, b in (
-            ("FrontTop", (0.87, y_frame, 0.73), (-0.03, y_frame, 0.73)),
-            ("FrontBottom", (0.87, y_frame, 0.25), (-0.03, y_frame, 0.25)),
-            ("RearTop", (-0.16, y_frame, 0.69), (-0.98, y_frame, 0.69)),
-            ("RearBottom", (-0.16, y_frame, 0.25), (-0.98, y_frame, 0.25)),
-            ("WindowPost", (-0.08, y_frame, 0.22), (-0.08, y_frame, 0.76)),
-        ):
-            tube_between(f"WindowFrame_{side}_{frame_name}", a, b, 0.012, col, mats["rubber"], root)
-        # Door seam and handle.
-        tube_between(f"DoorSeam_{side}_A", (0.92, sign * 0.786, -0.26), (0.92, sign * 0.786, 0.80), 0.010, col, mats["rubber"], root)
-        tube_between(f"DoorSeam_{side}_B", (-0.12, sign * 0.786, -0.26), (-0.12, sign * 0.786, 0.80), 0.010, col, mats["rubber"], root)
-        cube(f"DoorHandle_{side}", (0.15, sign * 0.805, 0.38), (0.18, 0.035, 0.035), col, mats["dark_metal"], root, bevel=0.012)
-
-    # Cabin seats and panel visible through glazing.
-    for x in (0.35, -0.58):
+    # Cabin interior: four seats, panel with glareshield, two yokes.
+    for x in (0.38, -0.55):
         for sign in (1, -1):
-            cube(f"Seat_{x}_{sign}_Base", (x, sign * 0.38, -0.30), (0.52, 0.46, 0.15), col, mats["seat"], root, bevel=0.07)
-            cube(f"Seat_{x}_{sign}_Back", (x - 0.18, sign * 0.38, -0.03), (0.18, 0.46, 0.56), col, mats["seat"], root, bevel=0.07, rotation=(0, -0.12, 0))
-    cube("InstrumentPanel", (1.02, 0, 0.12), (0.18, 1.25, 0.42), col, mats["panel"], root, bevel=0.04, rotation=(0, -0.12, 0))
+            cube(f"Seat_{x}_{sign}_Base", (x, sign * 0.27, -0.28), (0.50, 0.40, 0.14), col, mats["seat"], root, bevel=0.06)
+            cube(f"Seat_{x}_{sign}_Back", (x - 0.20, sign * 0.27, 0.02), (0.14, 0.40, 0.58), col, mats["seat"], root, bevel=0.06, rotation=(0, -0.12, 0))
+    cube("InstrumentPanel", (1.08, 0, 0.18), (0.10, 1.04, 0.42), col, mats["panel"], root, bevel=0.03, rotation=(0, -0.10, 0))
+    cube("Glareshield", (1.04, 0, 0.42), (0.26, 1.04, 0.05), col, mats["panel"], root, bevel=0.02)
     for sign in (1, -1):
-        for ix in (0.96, 1.00):
-            cylinder(f"Gauge_{sign}_{ix}", (1.115, sign * (0.22 + (ix - 0.96) * 6), 0.33), 0.07, 0.018,
-                     col, mats["display"], root, rotation=(0, math.pi / 2, 0), vertices=20)
-    # Yokes as simple rings.
-    for sign in (1, -1):
-        torus(f"Yoke_{sign}", (0.78, sign * 0.36, 0.14), 0.13, 0.018, col, mats["rubber"], root, rotation=(0, math.pi / 2, 0))
-        tube_between(f"YokeStem_{sign}", (0.78, sign * 0.36, 0.14), (0.96, sign * 0.36, 0.14), 0.018, col, mats["metal"], root)
+        for k in range(3):
+            cylinder(f"Gauge_{sign}_{k}", (1.03, sign * (0.16 + k * 0.11), 0.26), 0.045, 0.012, col, mats["display"], root,
+                     rotation=(0, math.pi / 2, 0), vertices=20)
+        torus(f"Yoke_{sign}", (0.80, sign * 0.27, 0.16), 0.12, 0.016, col, DARK, root, rotation=(0, math.pi / 2, 0))
+        tube_between(f"YokeStem_{sign}", (0.80, sign * 0.27, 0.16), (1.05, sign * 0.27, 0.16), 0.016, col, MET, root)
 
-    # Fixed tricycle gear. Wheel spin nodes remain separate.
+    # Fixed tricycle gear: spring-steel main legs, teardrop wheel fairings, oleo nose strut.
+    def fairing(name, center, length, width, height):
+        cx, cy, cz = center
+        secs = []
+        for u in (0.0, 0.08, 0.25, 0.5, 0.75, 0.92, 1.0):
+            prof_r = (math.sin(math.pi * min(max(u * 0.92 + 0.04, 0), 1)) ** 0.6) * (1.0 - 0.35 * max(0.0, u - 0.5) * 2)
+            xx = cx + length * (0.42 - u)
+            ring = [(width * prof_r * math.cos(2 * math.pi * j / 20), height * prof_r * math.sin(2 * math.pi * j / 20)) for j in range(20)]
+            secs.append((xx, ring))
+        verts, faces = [], []
+        for xx, ring in secs:
+            for y, z in ring:
+                verts.append((xx, cy + y, cz + z))
+        for i in range(len(secs) - 1):
+            for j in range(20):
+                a, b = i * 20 + j, i * 20 + (j + 1) % 20
+                faces.append((a, b, b + 20, a + 20))
+        return mesh_obj(name, verts, faces, col, W, root)
+
     for sign, side in ((1, "L"), (-1, "R")):
-        tube_between(f"MainGearStrut_{side}", (-0.35, sign * 0.48, -0.30), (-0.18, sign * 1.02, -0.72), 0.042, col, mats["metal"], root)
+        leg = tube_between(f"MainGearLeg_{side}", (-0.22, sign * 0.38, -0.44), (-0.18, sign * 0.96, -0.80), 0.045, col, MET, root, vertices=10)
+        leg.scale = (1.0, 0.45, 1.0)
         wheel = empty(f"MainWheel_{side}", col, (-0.18, sign * 1.02, -0.80), root)
         wheel["runtimeAxis"] = "Z"
         torus(f"MainWheel_{side}_Tire", (0, 0, 0), 0.205, 0.075, col, mats["tire"], wheel, rotation=(math.pi / 2, 0, 0), major_segments=28)
-        cylinder(f"MainWheel_{side}_Hub", (0, 0, 0), 0.105, 0.16, col, mats["metal"], wheel, rotation=(math.pi / 2, 0, 0), vertices=24)
-        sphere(f"MainGearFairing_{side}", (-0.18, sign * 1.02, -0.72), (0.42, 0.16, 0.23), col, mats["white"], root, 24, 12)
+        cylinder(f"MainWheel_{side}_Hub", (0, 0, 0), 0.105, 0.16, col, MET, wheel, rotation=(math.pi / 2, 0, 0), vertices=24)
+        fairing(f"MainGearFairing_{side}", (-0.18, sign * 1.02, -0.76), 1.05, 0.115, 0.205)
+        cube(f"Step_{side}", (-0.05, sign * 0.80, -0.58), (0.12, 0.10, 0.02), col, mats["dark_metal"], root, bevel=0.01)
     nose_steer = empty("NoseWheelSteer", col, (2.25, 0, -0.28), root)
     nose_steer["runtimeAxis"] = "Y"
-    tube_between("NoseGearStrut", (0, 0, 0), (0.05, 0, -0.50), 0.040, col, mats["metal"], nose_steer)
+    tube_between("NoseGearStrut", (0, 0, 0), (0.05, 0, -0.46), 0.042, col, MET, nose_steer)
+    tube_between("NoseGearOleo", (0.04, 0, -0.30), (0.05, 0, -0.52), 0.05, col, mats["dark_metal"], nose_steer)
+    tube_between("NoseGearTorqueLink", (0.10, 0, -0.33), (0.12, 0, -0.50), 0.014, col, MET, nose_steer)
     nose_wheel = empty("NoseWheel", col, (0.05, 0, -0.59), nose_steer)
     nose_wheel["runtimeAxis"] = "Z"
     torus("NoseWheel_Tire", (0, 0, 0), 0.16, 0.058, col, mats["tire"], nose_wheel, rotation=(math.pi / 2, 0, 0), major_segments=24)
-    cylinder("NoseWheel_Hub", (0, 0, 0), 0.078, 0.13, col, mats["metal"], nose_wheel, rotation=(math.pi / 2, 0, 0), vertices=20)
-    sphere("NoseGearFairing", (2.30, 0, -0.78), (0.34, 0.14, 0.19), col, mats["white"], root, 24, 12)
+    cylinder("NoseWheel_Hub", (0, 0, 0), 0.078, 0.13, col, MET, nose_wheel, rotation=(math.pi / 2, 0, 0), vertices=20)
+    nf = fairing("NoseGearFairing", (2.30, 0, -0.81), 0.80, 0.095, 0.175)
+    parent_keep(nf, nose_steer)
 
-    # Cowling intake, pitot tube and simple roof antennas add scale cues without branding.
-    cube("CowlingIntake", (2.89, 0, -0.10), (0.035, 0.42, 0.14), col, mats["rubber"], root, bevel=0.025)
-    tube_between("PitotTube", (0.32, 4.05, 0.74), (0.72, 4.05, 0.72), 0.010, col, mats["dark_metal"], root)
-    tube_between("Antenna_VHF", (-0.32, 0, 0.79), (-0.58, 0, 1.10), 0.010, col, mats["dark_metal"], root)
-    tube_between("Antenna_GPS", (-0.92, 0.12, 0.70), (-1.02, 0.12, 0.83), 0.014, col, mats["dark_metal"], root)
+    # Antennas and the tail light give scale cues without any branding.
+    tube_between("Antenna_VHF", (-0.40, 0, 0.94), (-0.62, 0, 1.24), 0.008, col, mats["dark_metal"], root)
+    cube("Antenna_GPS", (-0.20, 0.0, 0.955), (0.14, 0.09, 0.025), col, mats["dark_metal"], root, bevel=0.01)
+    tube_between("Antenna_Belly", (-1.20, 0, -0.28), (-1.38, 0, -0.42), 0.006, col, mats["dark_metal"], root)
+    sphere("TailLight", (-4.99, 0, 0.40), (0.04, 0.035, 0.035), col, mats["white_light"], root, 16, 8)
 
-    # Original livery: cyan and charcoal pinstripes, no text or registration.
-    for sign, side in ((1, "L"), (-1, "R")):
-        tube_between(f"Livery_Cyan_{side}", (2.45, sign * 0.66, 0.18), (-3.45, sign * 0.24, 0.58), 0.018, col, mats["accent"], root)
-        tube_between(f"Livery_Dark_{side}", (2.35, sign * 0.67, 0.08), (-3.35, sign * 0.25, 0.48), 0.010, col, mats["rubber"], root)
-
-    # Lights.
-    sphere("NavLight_Port", (-0.05, 5.45, 1.23), (0.07, 0.05, 0.04), col, mats["red_light"], root, 16, 8)
-    sphere("NavLight_Starboard", (-0.05, -5.45, 1.23), (0.07, 0.05, 0.04), col, mats["green_light"], root, 16, 8)
-    sphere("TailLight", (-4.92, 0, 0.52), (0.05, 0.04, 0.04), col, mats["white_light"], root, 16, 8)
-
-    # Runtime anchors.
+    # Runtime anchors (unchanged: physics gear offsets and cameras depend on them).
     anchors = {
         "CG": (0, 0, 0), "PilotCamera": (0.10, -0.30, 0.58), "ChaseCamera": (-10.5, 0, 4.0),
         "MainGearContact_L": (-0.18, 1.02, -1.08), "MainGearContact_R": (-0.18, -1.02, -1.08),
@@ -719,6 +1027,7 @@ def main():
         "metal": material("Brushed_Aluminum", (0.55, 0.58, 0.60, 1), 0.24, 0.82),
         "dark_metal": material("Dark_Metal", (0.045, 0.055, 0.065, 1), 0.34, 0.62),
         "prop": material("Propeller_Black", (0.012, 0.014, 0.018, 1), 0.30),
+        "tip": material("Paint_PropTip", (0.75, 0.62, 0.04, 1), 0.35),
         "glass": material("Glass_Smoke", (0.018, 0.035, 0.045, 1), 0.20, transmission=0.12, alpha=0.90),
         "seat": material("Seat_Stone", (0.30, 0.32, 0.33, 1), 0.50),
         "panel": material("Panel_Charcoal", (0.022, 0.028, 0.035, 1), 0.48),
@@ -748,7 +1057,8 @@ def main():
 
     # Export before introducing QA-only transforms.
     export_root(aircraft_root, AIRCRAFT_GLB)
-    export_root(airfield_root, AIRFIELD_GLB)
+    if not AIRCRAFT_ONLY:
+        export_root(airfield_root, AIRFIELD_GLB)
     bpy.ops.wm.save_as_mainfile(filepath=str(BLEND_PATH), compress=True)
 
     cam, floor = setup_render(studio_col, mats)
@@ -763,6 +1073,11 @@ def main():
     render(scene, cam, "01-aircraft-perspective.png", (12.5, -14.0, 6.8), (-0.5, 0, 0.1), 58)
     render(scene, cam, "02-aircraft-port-profile.png", (0.0, 17.0, 2.3), (-0.6, 0, 0.0), 62)
     render(scene, cam, "03-aircraft-top-controls.png", (-0.8, -0.8, 16.5), (-0.6, 0, 0.0), 58)
+    if AIRCRAFT_ONLY:
+        render(scene, cam, "05-gear-prop-detail.png", (6.0, -5.0, 0.0), (2.0, -0.1, -0.40), 68)
+        render(scene, cam, "10-aircraft-front-quarter.png", (9.0, 6.5, 1.4), (0.2, 0, 0.2), 50)
+        print(f"AIRCRAFT_GLB={AIRCRAFT_GLB} bytes={AIRCRAFT_GLB.stat().st_size}")
+        return
 
     # Pilot-view proof on the real runway. The closed exterior shell is hidden for this camera only;
     # runtime cockpit mode follows the same contract while all interior, glass and control nodes stay visible.

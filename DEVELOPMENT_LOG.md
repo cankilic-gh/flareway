@@ -264,3 +264,34 @@ The cost is the lagoon and surf shading near the shore plus the beach wet band. 
 Known gaps:
 - The waterline sampling uses 256 angles. A spit narrower than about 15 m is smoothed out of the swash band.
 - Caustics and lace scroll a baked tile instead of evolving.
+
+## 2026-10-01: FT-172 airframe revision 2 (realistic trainer silhouette)
+
+User feedback: the aircraft may stay low-poly but should read like a real four-seat high-wing trainer. The FT-172 stays an original, logo-free design. A public three-view of the type was used only to check proportions and silhouette; no geometry was traced and no branding, registration or manufacturer livery was added (see `ASSET_LICENSES.md`).
+
+`build_aircraft` in `tools/blender/generate_flareway_assets.py` was rewritten:
+
+- **Fuselage.** A superellipse-section loft (boxy flat-sided cabin about 1.15 m wide, rounded roof, flatter belly) with a subdivision pass.
+  - The cowling tapers to the spinner.
+  - The aft fuselage has straight top and bottom lines to a thin tail cone.
+  - The tail-strike anchor still sits on the belly line.
+- **Glazing, doors and livery.** All are patches of the skin surface, so they follow its curvature:
+  - Windshield, door and rear side windows, and the rear window behind the wing, each with a dark gasket.
+  - Door outlines.
+  - The cyan sweep with a charcoal pinstripe.
+- **Wing.** NACA 2412 sections, constant chord inboard and tapering outboard, 1.7° dihedral, rounded tips.
+  - Flaps and ailerons share a straight hinge at x = -0.68, so they rotate about the span axis.
+  - One faired strut per side.
+  - Fuel caps, pitot, landing light and wingtip nav lights.
+  - The `airfoil_part` helper samples every section with a fixed point count, so tapered lofts never twist.
+- **Tail.** A swept fin with a dorsal fillet, the rudder on a vertical hinge, and a low-set stabilizer with the elevator on a straight hinge.
+- **Gear and propeller.**
+  - Spring-steel main legs, teardrop wheel fairings, an oleo nose strut with a torque link and a steering fairing.
+  - Twisted, tapered propeller blades with painted tips and a contoured spinner.
+- **Interior.** Four seats, panel and glareshield with gauges, and two yokes. These are visible in cockpit view, where the fuselage shell is hidden.
+
+Every runtime contract is unchanged: the 21 required node names, the gear, camera, CG and tail-strike anchors (the physics offsets in `GEAR`), the hinge axes, and the `Paint_WarmWhite` and `Glass_Smoke` material names. The generator gained `--aircraft-only`, which exports only the aircraft GLB so the airfield GLB is untouched.
+
+- GLB: 581 KB → 670 KB.
+- `npm run verify`: lint, typecheck, 73/73 unit tests and build.
+- `npm run test:e2e`: 36/36 (Chromium + WebKit), including binding, anchors, hinge corrections and control-surface animation.
