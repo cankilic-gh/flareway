@@ -1,5 +1,10 @@
 import {
   BufferAttribute,
+  DataTexture,
+  FloatType,
+  LinearFilter,
+  RedFormat,
+  RepeatWrapping,
   BufferGeometry,
   Color,
   ConeGeometry,
@@ -109,8 +114,103 @@ const colorize = (g: BufferGeometry, c: Color): BufferGeometry => {
   return geo;
 };
 
+/**
+ * Soft crown lighting: blend the normals of crown-coloured vertices toward the direction from the crown centre,
+ * so a low-poly canopy lights as one rounded volume instead of a cluster of facets.
+ */
+const softenCrown = (g: BufferGeometry, crown: Color, amount = 0.6): BufferGeometry => {
+  if (!g.attributes['normal']) g.computeVertexNormals();
+  const pos = g.attributes['position'] as BufferAttribute;
+  const nor = g.attributes['normal'] as BufferAttribute;
+  const col = g.attributes['color'] as BufferAttribute;
+  const isCrown = (i: number) => Math.abs(col.getX(i) - crown.r) + Math.abs(col.getY(i) - crown.g) + Math.abs(col.getZ(i) - crown.b) < 1e-4;
+  const center = new Vector3();
+  let n = 0;
+  for (let i = 0; i < pos.count; i++) {
+    if (!isCrown(i)) continue;
+    center.x += pos.getX(i);
+    center.y += pos.getY(i);
+    center.z += pos.getZ(i);
+    n++;
+  }
+  if (n === 0) return g;
+  center.divideScalar(n);
+  const p = new Vector3();
+  const nv = new Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    if (!isCrown(i)) continue;
+    p.set(pos.getX(i) - center.x, (pos.getY(i) - center.y) * 1.2, pos.getZ(i) - center.z).normalize();
+    nv.set(nor.getX(i), nor.getY(i), nor.getZ(i)).lerp(p, amount).normalize();
+    nor.setXYZ(i, nv.x, nv.y, nv.z);
+  }
+  nor.needsUpdate = true;
+  return g;
+};
+
+/** Angular samples of the visible waterline (normalised island radius per angle). */
+export const SHORE_SAMPLES = 256;
+
+/**
+ * Visible waterline per angle, found the way the renderer sees it: march outward along each angle and raycast
+ * down onto the land meshes; the first point that misses or falls below the sea is the waterline. The ocean's
+ * swash band and the terrain's wet band read this, so they hug the shore the player actually sees.
+ */
+export const measureShoreline = (meshes: (Mesh | undefined)[], seaY: number): DataTexture => {
+  const land = meshes.filter((m): m is Mesh => !!m?.isMesh);
+  const data = new Float32Array(SHORE_SAMPLES);
+  const ray = new Raycaster();
+  const down = new Vector3(0, -1, 0);
+  const origin = new Vector3();
+  for (const m of land) m.updateMatrixWorld(true);
+  for (let i = 0; i < SHORE_SAMPLES; i++) {
+    const a = (i / SHORE_SAMPLES) * Math.PI * 2;
+    const irr = 1 + 0.045 * Math.sin(a * 5 + 0.8) + 0.025 * Math.sin(a * 11);
+    const yIrr = 1 + 0.035 * Math.cos(a * 7);
+    let edge = 1.06;
+    for (let r = 0.86; r <= 1.06; r += 0.002) {
+      const x = Math.cos(a) * 590 * irr * r;
+      const yB = Math.sin(a) * 260 * irr * yIrr * r;
+      origin.set(x, 400, -yB);
+      ray.set(origin, down);
+      const hit = ray.intersectObjects(land, false)[0];
+      if (!hit || hit.point.y < seaY + 0.02) {
+        edge = r;
+        break;
+      }
+    }
+    data[i] = edge;
+  }
+  // Rocks, spits and ray misses make single-angle spikes: a circular median, then two box passes, keep the
+  // surf lines smooth around the island.
+  const n = SHORE_SAMPLES;
+  const med = new Float32Array(n);
+  const win: number[] = [];
+  for (let i = 0; i < n; i++) {
+    win.length = 0;
+    for (let k = -5; k <= 5; k++) win.push(data[(i + k + n) % n]!);
+    win.sort((x, y) => x - y);
+    med[i] = Math.min(Math.max(win[5]!, 0.96), 1.05);
+  }
+  for (let pass = 0; pass < 2; pass++) {
+    const src = pass === 0 ? med : data;
+    const dst = pass === 0 ? data : med;
+    for (let i = 0; i < n; i++) {
+      let sum = 0;
+      for (let k = -4; k <= 4; k++) sum += src[(i + k + n) % n]!;
+      dst[i] = sum / 9;
+    }
+  }
+  data.set(med);
+  const tex = new DataTexture(data, SHORE_SAMPLES, 1, RedFormat, FloatType);
+  tex.wrapS = RepeatWrapping;
+  tex.magFilter = LinearFilter;
+  tex.minFilter = LinearFilter;
+  tex.needsUpdate = true;
+  return tex;
+};
+
 /** Adds gentle wind sway to instanced vegetation. */
-const swayMaterial = (uniforms: { uTime: { value: number } }, amount: number): MeshStandardMaterial => {
+const swayMaterial = (uniforms: { uTime: { value: number } }, amount: number, foliage = false): MeshStandardMaterial => {
   const m = new MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, side: DoubleSide });
   m.onBeforeCompile = (shader) => {
     shader.uniforms['uTime'] = uniforms.uTime;
@@ -125,9 +225,48 @@ const swayMaterial = (uniforms: { uTime: { value: number } }, amount: number): M
           transformed.x += sway * ${amount.toFixed(3)} * max(transformed.y, 0.0) * max(transformed.y, 0.0);
           transformed.z += sway * ${(amount * 0.6).toFixed(3)} * max(transformed.y, 0.0) * max(transformed.y, 0.0);
         #endif`,
+      )
+      .replace('#include <common>', '#include <common>\nvarying vec3 vSwWorld;')
+      .replace(
+        '#include <project_vertex>',
+        `#include <project_vertex>
+        {
+          vec4 sw = vec4(transformed, 1.0);
+          #ifdef USE_INSTANCING
+            sw = instanceMatrix * sw;
+          #endif
+          vSwWorld = (modelMatrix * sw).xyz;
+        }`,
       );
+    // Leaf-cluster breakup for tree crowns: world-space value noise gives each instance its own gaps and clumps.
+    if (foliage) {
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          varying vec3 vSwWorld;
+          float swHash(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+          float swNoise(vec3 p) {
+            vec3 i = floor(p), f = fract(p);
+            vec3 u = f * f * (3.0 - 2.0 * f);
+            return mix(mix(mix(swHash(i), swHash(i + vec3(1, 0, 0)), u.x), mix(swHash(i + vec3(0, 1, 0)), swHash(i + vec3(1, 1, 0)), u.x), u.y),
+                       mix(mix(swHash(i + vec3(0, 0, 1)), swHash(i + vec3(1, 0, 1)), u.x), mix(swHash(i + vec3(0, 1, 1)), swHash(i + vec3(1, 1, 1)), u.x), u.y), u.z);
+          }`,
+        )
+        .replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+          {
+            float clump = swNoise(vSwWorld * 1.6) * 0.65 + swNoise(vSwWorld * 4.1) * 0.35;
+            float crownish = step(vColor.r * 1.4, vColor.g);
+            diffuseColor.rgb *= mix(1.0, 0.68 + 0.6 * smoothstep(0.25, 0.8, clump), crownish);
+          }`,
+        );
+    } else {
+      shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vSwWorld;');
+    }
   };
-  m.customProgramCacheKey = () => `sway-${amount}`;
+  m.customProgramCacheKey = () => `sway-${amount}-${foliage ? 'f' : 'g'}`;
   return m;
 };
 
@@ -169,8 +308,9 @@ export class AirfieldView {
     }
     for (let i = 1; i <= 4; i++) for (const c of ['White', 'Red']) if (source.getObjectByName(`PAPI_${i}_${c}`)) this.boundNodes.push(`PAPI_${i}_${c}`);
 
-    // Terrain and beach share the height/slope blended material.
-    const terrainMat = createTerrainMaterial();
+    // Terrain and beach share the height/slope blended material; the wet swash band runs on the ocean's clock.
+    const oceanMat = createOceanMaterial();
+    const terrainMat = createTerrainMaterial(oceanMat.uniforms.uTime, oceanMat.uniforms.uShore);
     for (const name of ['IslandTerrain', 'BeachRing']) {
       const m = source.getObjectByName(name) as Mesh | undefined;
       if (m?.isMesh) {
@@ -182,7 +322,6 @@ export class AirfieldView {
 
     // Ocean: keep the authored node and its transform; replace the placeholder material with the ocean shader and
     // extend its geometry to the horizon so final approach is flown over water.
-    const oceanMat = createOceanMaterial();
     this.oceanUniforms = oceanMat.uniforms;
     let ocean = source.getObjectByName('OceanReferencePlane') as Mesh | undefined;
     if (!ocean?.isMesh) {
@@ -197,6 +336,15 @@ export class AirfieldView {
     ocean.geometry.dispose();
     ocean.geometry = plane;
     ocean.material = oceanMat;
+    // Key the shoreline effects to the waterline as rendered (the ocean node's height plus the plane offset).
+    ocean.updateMatrixWorld(true);
+    const seaY = new Vector3(0, 0.06, 0).applyMatrix4(ocean.matrixWorld).y;
+    // Lagoon caustics and surf lace are skipped on Low.
+    oceanMat.uniforms['uShoreDetail']!.value = q.id === 'low' ? 0 : 1;
+    oceanMat.uniforms.uShore.value = measureShoreline(
+      [source.getObjectByName('IslandTerrain') as Mesh | undefined, source.getObjectByName('BeachRing') as Mesh | undefined],
+      seaY,
+    );
     ocean.receiveShadow = false;
     ocean.castShadow = false;
     ocean.renderOrder = -1;
@@ -392,14 +540,14 @@ export class AirfieldView {
     const crownDec = new Color(0.05, 0.12, 0.028);
     const crownCon = new Color(0.028, 0.075, 0.03);
     const nearGeo: (BufferGeometry | null)[] = [
-      dec ? mergeTemplate(dec, (m) => (m.name.includes('Trunk') ? trunk : crownDec)) : null,
-      con ? mergeTemplate(con, (m) => (m.name.includes('Trunk') ? trunk : crownCon)) : null,
+      dec ? softenCrown(mergeTemplate(dec, (m) => (m.name.includes('Trunk') ? trunk : crownDec))!, crownDec) : null,
+      con ? softenCrown(mergeTemplate(con, (m) => (m.name.includes('Trunk') ? trunk : crownCon))!, crownCon, 0.45) : null,
     ];
     const farDec = new IcosahedronGeometry(2.2, 0);
     farDec.scale(1, 1.15, 1).translate(0, 5.2, 0);
     const farCon = new ConeGeometry(2.1, 6.2, 6);
     farCon.translate(0, 3.6, 0);
-    const farGeo = [colorize(farDec, crownDec), colorize(farCon, crownCon)];
+    const farGeo = [softenCrown(colorize(farDec, crownDec), crownDec), softenCrown(colorize(farCon, crownCon), crownCon, 0.45)];
     if (dec) dec.visible = false;
     if (con) con.visible = false;
 
@@ -451,7 +599,7 @@ export class AirfieldView {
     this.vegetationStats.total = max;
     const makeInstanced = (geo: BufferGeometry | null, amount: number): InstancedMesh | null => {
       if (!geo) return null;
-      const m = new InstancedMesh(geo, swayMaterial(this.swayUniforms, amount), Math.max(1, max));
+      const m = new InstancedMesh(geo, swayMaterial(this.swayUniforms, amount, q.id !== 'low'), Math.max(1, max));
       m.instanceColor = new InstancedBufferAttribute(new Float32Array(Math.max(1, max) * 3), 3);
       m.count = 0;
       m.frustumCulled = false;

@@ -225,3 +225,42 @@ put the turning (bank) on the left/right arrow keys.
   nosewheel on the ground, so holding the upwind wing down in a crosswind rollout does not turn the aircraft.
   Settings storage moved to `flareway.settings.v2`; older saved bindings are dropped so the new layout applies.
 - Autopilot sweep unchanged (calm 958 avg, 13 Butter; takeoff 973–1000). Unit 69/69, E2E 36/36 (Chrome + WebKit).
+
+## 2026-10-01: lagoon, surf and shoreline pass (ported from Shore Water)
+
+A visual pass that brings the shoreline techniques from the Shore Water diorama (https://shorewater.thegridbase.com) to the island. Nothing in `src/sim` changed in behaviour. `islandRadius` stays private, and the flight model, scoring and ground queries are untouched.
+
+- **Lagoon.** Near the island the ocean now shows a sand shelf through clear water:
+  - A reef edge about 75 m out, then the drop-off, with noise-varied depth.
+  - Per-channel Beer–Lambert absorption and turquoise in-scatter.
+  - Moving caustics from a baked tileable cellular texture (`makeCellTexture`), fading into the open-ocean colour with depth.
+- **Surf.** Wave fronts roll in toward the shore, break on the reef edge and again in the swash, and are broken up along the shore by noise and slow sets. They are drawn as cellular lace that thins into holes. This replaces the old thin pulsing foam ring.
+- **Measured waterline.** The visible waterline differs from the analytic radius by angle (hills reach the south shore, the beach ring floats on the east tip).
+  - At load, `measureShoreline` marches outward along 256 angles and raycasts down onto `IslandTerrain` and `BeachRing`. A sample that misses or falls below the sea marks the waterline.
+  - The samples get a circular median and two box passes, then go into a 1D texture.
+  - The swash band, the surf phase and the terrain's wet band all read it, so they sit on the shore the player sees.
+- **Terrain.**
+  - Wind ripples and grain on sand, and blade-scale speckle on grass. Both apply only within ~10 cm per pixel, so they cost nothing at approach altitude.
+  - A wet band on the beach that breathes with the swash on the ocean's clock, with glossier roughness.
+- **Trees.**
+  - Crown normals are bent away from the crown centre (`softenCrown`), so the low-poly canopies light as soft volumes.
+  - World-space leaf-cluster noise breaks up instanced crowns.
+- **Quality.** On Low the lagoon caustics, surf lace and foliage noise are skipped (`uShoreDetail`). The surf bands remain as soft foam.
+
+Tests:
+- New `tests/unit/shoreline.test.ts`: one sample per angle, inner and outer clamps, land below the sea ignored. Written with the implementation, not RED first.
+- `npm run verify`: lint, typecheck, 73/73 unit tests and build.
+- `npm run test:e2e`: 36/36 (Chromium + WebKit).
+
+Performance (headless Chromium on the Apple M5, Normal, 1600×900 at DPR 1.5, production build served locally, two fixed QA poses: oblique over the south shore and low over the beach):
+
+| | Before | After |
+|---|---|---|
+| fps, pose 1 | 79 | 65 |
+| fps, pose 2 | 85 | 76 |
+
+The cost is the lagoon and surf shading near the shore plus the beach wet band. Low quality is unaffected.
+
+Known gaps:
+- The waterline sampling uses 256 angles. A spit narrower than about 15 m is smoothed out of the swash band.
+- Caustics and lace scroll a baked tile instead of evolving.
