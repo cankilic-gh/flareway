@@ -1,5 +1,6 @@
 import { DEFAULT_BINDINGS, type Bindings } from './bindings';
 import type { QualityId } from '../render/quality';
+import type { TimeOfDay } from '../render/environment';
 
 export interface Settings {
   /** Aviation style: the "Up" pitch key pushes the nose down. */
@@ -10,6 +11,8 @@ export interface Settings {
   centerlineGuidance: boolean;
   approachMarker: boolean;
   quality: QualityId;
+  /** Lighting only: the wind, the runway and the scoring are the same at night. */
+  timeOfDay: TimeOfDay;
   volume: number;
   reducedMotion: boolean;
   gamepadThrottleOnStick: boolean;
@@ -28,6 +31,7 @@ export const defaultSettings = (): Settings => ({
   centerlineGuidance: true,
   approachMarker: true,
   quality: 'normal',
+  timeOfDay: 'day',
   volume: 0.7,
   reducedMotion: typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
   gamepadThrottleOnStick: false,

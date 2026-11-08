@@ -532,6 +532,7 @@ export class App {
       rumble: this.flow.screen === 'playing' ? this.rumble : 0,
       guidance: this.settings.centerlineGuidance && session?.mode === 'landing' && this.flow.screen !== 'result',
       reducedMotion: this.settings.reducedMotion,
+      timeOfDay: this.settings.timeOfDay,
       dof,
     };
     this.lastFrame = frame;

@@ -15,19 +15,69 @@ import {
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import type { QualityPreset } from './quality';
 
+export type TimeOfDay = 'day' | 'dusk' | 'night';
+
 export interface Environment {
   sky: Sky;
   sun: DirectionalLight;
   hemi: HemisphereLight;
+  /** Direction of the key light: the sun by day, a stand-in moon at night (the sky's own sun sits below the horizon). */
   sunDir: Vector3;
+  sunColor: Color;
   fogColor: Color;
   skyHorizon: Color;
   skyZenith: Color;
+  timeOfDay: TimeOfDay;
+  /** How much the airfield lights should glow: 1 by day, more as it gets dark. */
+  lightGlow: number;
+  daylight: number;
+  setTimeOfDay(t: TimeOfDay): void;
   update(focus: Vector3): void;
   dispose(): void;
 }
 
-const SUN_ELEVATION = 38;
+interface Look {
+  /** Sun elevation for the sky (degrees; negative = below the horizon). */
+  skySunElevation: number;
+  /** Elevation of the light that actually lights the scene. */
+  lightElevation: number;
+  turbidity: number;
+  rayleigh: number;
+  mie: number;
+  sunColor: string;
+  sunIntensity: number;
+  hemiSky: string;
+  hemiGround: string;
+  hemiIntensity: number;
+  envIntensity: number;
+  fog: string;
+  fogDensity: number;
+  horizon: string;
+  zenith: string;
+  lightGlow: number;
+  /** Scales unlit surface colours (the water body) that the light rig does not reach. */
+  daylight: number;
+}
+
+const LOOKS: Record<TimeOfDay, Look> = {
+  day: {
+    skySunElevation: 38, lightElevation: 38, turbidity: 2.4, rayleigh: 1.1, mie: 0.0035,
+    sunColor: '#fff3df', sunIntensity: 5.2, hemiSky: '#bfd9f2', hemiGround: '#5a6a3a', hemiIntensity: 0.35,
+    envIntensity: 1.4, fog: '#c3d3df', fogDensity: 0.00007, horizon: '#c9dcea', zenith: '#5b8fcf', lightGlow: 1, daylight: 1,
+  },
+  dusk: {
+    // Sun a few degrees up: long shadows, amber light, the runway lights already reading against the ground.
+    skySunElevation: 4, lightElevation: 6, turbidity: 6, rayleigh: 2.2, mie: 0.012,
+    sunColor: '#ffb473', sunIntensity: 3.2, hemiSky: '#7f8fb8', hemiGround: '#3c3a30', hemiIntensity: 0.38,
+    envIntensity: 0.9, fog: '#b58e86', fogDensity: 0.00012, horizon: '#e0a888', zenith: '#3c5a94', lightGlow: 1.9, daylight: 0.55,
+  },
+  night: {
+    // Sky sun below the horizon keeps a faint glow; a cool moon from the opposite side lights the scene.
+    skySunElevation: 1.2, lightElevation: 28, turbidity: 9, rayleigh: 0.35, mie: 0.002,
+    sunColor: '#9fb4d8', sunIntensity: 0.9, hemiSky: '#2a3752', hemiGround: '#141614', hemiIntensity: 0.3,
+    envIntensity: 0.35, fog: '#1b2433', fogDensity: 0.00016, horizon: '#2b3a55', zenith: '#070b16', lightGlow: 2.8, daylight: 0.14,
+  },
+};
 
 /** Caps sky radiance below the bloom threshold so only lights bloom, and keeps the glare around the sun readable. */
 const capSkyLuminance = (sky: Sky): void => {
@@ -39,30 +89,28 @@ const capSkyLuminance = (sky: Sky): void => {
 // Three.js spherical theta: 0 = +Z (south), 90 = +X (east). 335 = south-southwest.
 const SUN_AZIMUTH = 335;
 
-/** Bright daytime lighting: Preetham sky, PMREM environment, one coherent sun with a tight shadow frustum. */
-export const createEnvironment = (renderer: WebGLRenderer, scene: Scene, q: QualityPreset): Environment => {
-  const sunDir = new Vector3().setFromSphericalCoords(1, MathUtils.degToRad(90 - SUN_ELEVATION), MathUtils.degToRad(SUN_AZIMUTH));
+const dirFor = (elevation: number): Vector3 =>
+  new Vector3().setFromSphericalCoords(1, MathUtils.degToRad(90 - elevation), MathUtils.degToRad(SUN_AZIMUTH));
+
+/** Preetham sky, PMREM environment, one coherent key light with a tight shadow frustum; day, dusk or night. */
+export const createEnvironment = (renderer: WebGLRenderer, scene: Scene, q: QualityPreset, initial: TimeOfDay = 'day'): Environment => {
+  const sunDir = new Vector3();
+  const skySunDir = new Vector3();
 
   const sky = new Sky();
   capSkyLuminance(sky);
   sky.scale.setScalar(18000);
   const u = sky.material.uniforms;
-  u['turbidity']!.value = 2.4;
-  u['rayleigh']!.value = 1.1;
-  u['mieCoefficient']!.value = 0.0035;
   u['mieDirectionalG']!.value = 0.8;
-  u['sunPosition']!.value.copy(sunDir);
   sky.frustumCulled = false;
   scene.add(sky);
 
-  // Environment map from a small copy of the same sky.
+  // Environment map from a small copy of the same sky, rebuilt whenever the time of day changes.
   const envScene = new Scene();
   const envSky = new Sky();
   capSkyLuminance(envSky);
   envSky.scale.setScalar(100);
   const eu = envSky.material.uniforms;
-  for (const k of ['turbidity', 'rayleigh', 'mieCoefficient', 'mieDirectionalG'] as const) eu[k]!.value = u[k]!.value;
-  eu['sunPosition']!.value.copy(sunDir);
   envScene.add(envSky);
   // The Preetham sky is bright below the horizon; a dark sea-coloured lower hemisphere keeps undersides and
   // cabin interiors from being lit as if the ocean were a bright sky.
@@ -71,17 +119,20 @@ export const createEnvironment = (renderer: WebGLRenderer, scene: Scene, q: Qual
   const sea = new Mesh(seaGeo, new MeshBasicMaterial({ color: new Color(0.018, 0.05, 0.065) }));
   sea.position.y = -2;
   envScene.add(sea);
-  const pmrem = new PMREMGenerator(renderer);
-  const envRT = pmrem.fromScene(envScene, 0, 0.1, 1000);
-  scene.environment = envRT.texture;
-  scene.environmentIntensity = 1.4;
-  pmrem.dispose();
-  seaGeo.dispose();
-  envSky.geometry.dispose();
-  envSky.material.dispose();
+  let envRT: ReturnType<PMREMGenerator['fromScene']> | null = null;
+  const bakeEnvironment = () => {
+    for (const k of ['turbidity', 'rayleigh', 'mieCoefficient', 'mieDirectionalG'] as const) eu[k]!.value = u[k]!.value;
+    eu['sunPosition']!.value.copy(skySunDir);
+    const pmrem = new PMREMGenerator(renderer);
+    const next = pmrem.fromScene(envScene, 0, 0.1, 1000);
+    pmrem.dispose();
+    envRT?.dispose();
+    envRT = next;
+    scene.environment = next.texture;
+  };
 
-  const fogColor = new Color('#c3d3df');
-  scene.fog = new FogExp2(fogColor.getHex(), 0.00007);
+  const fogColor = new Color();
+  scene.fog = new FogExp2(0xffffff, 0.00007);
 
   const sun = new DirectionalLight(new Color('#fff3df'), 5.2);
   sun.castShadow = q.shadowMapSize > 0;
@@ -103,14 +154,44 @@ export const createEnvironment = (renderer: WebGLRenderer, scene: Scene, q: Qual
   const hemi = new HemisphereLight(new Color('#bfd9f2'), new Color('#5a6a3a'), 0.35);
   scene.add(hemi);
 
-  return {
+  const env: Environment = {
     sky,
     sun,
     hemi,
     sunDir,
+    sunColor: new Color('#fff3df'),
     fogColor,
     skyHorizon: new Color('#c9dcea'),
     skyZenith: new Color('#5b8fcf'),
+    timeOfDay: initial,
+    lightGlow: 1,
+    daylight: 1,
+    setTimeOfDay(t: TimeOfDay) {
+      const look = LOOKS[t];
+      env.timeOfDay = t;
+      skySunDir.copy(dirFor(look.skySunElevation));
+      sunDir.copy(dirFor(look.lightElevation));
+      u['turbidity']!.value = look.turbidity;
+      u['rayleigh']!.value = look.rayleigh;
+      u['mieCoefficient']!.value = look.mie;
+      u['sunPosition']!.value.copy(skySunDir);
+      sun.color.set(look.sunColor);
+      sun.intensity = look.sunIntensity;
+      env.sunColor.set(look.sunColor);
+      hemi.color.set(look.hemiSky);
+      hemi.groundColor.set(look.hemiGround);
+      hemi.intensity = look.hemiIntensity;
+      scene.environmentIntensity = look.envIntensity;
+      fogColor.set(look.fog);
+      const fog = scene.fog as FogExp2;
+      fog.color.copy(fogColor);
+      fog.density = look.fogDensity;
+      env.skyHorizon.set(look.horizon);
+      env.skyZenith.set(look.zenith);
+      env.lightGlow = look.lightGlow;
+      env.daylight = look.daylight;
+      bakeEnvironment();
+    },
     update(focus: Vector3) {
       // Tight, texel-snapped shadow frustum that follows the aircraft/runway focus.
       sun.target.position.copy(focus);
@@ -118,7 +199,12 @@ export const createEnvironment = (renderer: WebGLRenderer, scene: Scene, q: Qual
       sun.target.updateMatrixWorld();
     },
     dispose() {
-      envRT.dispose();
+      envRT?.dispose();
+      seaGeo.dispose();
+      envSky.geometry.dispose();
+      envSky.material.dispose();
     },
   };
+  env.setTimeOfDay(initial);
+  return env;
 };

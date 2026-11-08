@@ -117,6 +117,8 @@ export interface OceanUniforms {
   uShallow: IUniform<Color>;
   uSkyHorizon: IUniform<Color>;
   uSkyZenith: IUniform<Color>;
+  /** 1 by day, down to ~0.1 at night: scales the water body colour, which the sky terms do not light. */
+  uDaylight: IUniform<number>;
   /** Visible waterline radius per island angle (1D, see measureShoreline). */
   uShore: IUniform<Texture>;
 }
@@ -136,6 +138,7 @@ export const createOceanMaterial = (): ShaderMaterial & { uniforms: OceanUniform
       uShallow: { value: new Color('#2aa6a8') },
       uSkyHorizon: { value: new Color('#bcd6ea') },
       uSkyZenith: { value: new Color('#4f86c6') },
+      uDaylight: { value: 1 },
       uShore: { value: null },
       uCell: { value: null },
       uShoreDetail: { value: 1 },
@@ -171,6 +174,7 @@ export const createOceanMaterial = (): ShaderMaterial & { uniforms: OceanUniform
       uniform vec3 uShallow;
       uniform vec3 uSkyHorizon;
       uniform vec3 uSkyZenith;
+      uniform float uDaylight;
       uniform sampler2D uShore;
       uniform sampler2D uCell;
       uniform float uShoreDetail;
@@ -208,7 +212,7 @@ export const createOceanMaterial = (): ShaderMaterial & { uniforms: OceanUniform
         float r = islandRA(xzB, ang);
         float dS = (r - texture2D(uShore, vec2(fract(ang / 6.2831853), 0.5)).r) * length(vec2(590.0 * cos(ang), 260.0 * sin(ang)));
         float shore = 1.0 - smoothstep(1.0, 1.45, r);
-        vec3 water = mix(uDeep, uShallow, shore * 0.85) * 1.9;
+        vec3 water = mix(uDeep, uShallow, shore * 0.85) * 1.9 * uDaylight;
 
         // Clear lagoon over a sand shelf: a reef edge ~75 m out, then the drop-off. The bottom shows through with
         // per-channel absorption and moving caustics, fading into the open-ocean colour with depth.
@@ -223,11 +227,11 @@ export const createOceanMaterial = (): ShaderMaterial & { uniforms: OceanUniform
           float ca = cd > 0.0 ? (1.0 - smoothstep(0.0, 0.18, cellEdge(xzB * 0.22 + vec2(uTime * 0.05, uTime * 0.03), uTime * 0.6))) : 0.0;
           float cb = cd > 0.0 ? (1.0 - smoothstep(0.0, 0.16, cellEdge(xzB * 0.31 - vec2(uTime * 0.04, -uTime * 0.02) + 7.3, uTime * 0.45))) : 0.0;
           float caustic = (ca * 0.6 + cb * 0.45 + ca * cb) * cd * exp(-depth * 0.22);
-          vec3 lit = bed * (1.0 + caustic * 0.9) * 1.55;
+          vec3 lit = bed * (1.0 + caustic * 0.9) * 1.55 * uDaylight;
           vec3 absorb = vec3(0.42, 0.075, 0.05);
           vec3 T = exp(-absorb * depth * 1.8);
           vec3 scatter = vec3(0.04, 0.42, 0.5);
-          vec3 lagoon = lit * T + scatter * (1.0 - T);
+          vec3 lagoon = lit * T + scatter * uDaylight * (1.0 - T);
           water = mix(water, lagoon, nearShore * (1.0 - smoothstep(18.0, 45.0, depth)));
         }
 
@@ -400,7 +404,7 @@ export const createGlowPoints = (count: number): GlowPoints => {
   geometry.setAttribute('color', new BufferAttribute(colors, 3));
   geometry.setAttribute('size', new BufferAttribute(sizes, 1));
   const material = new ShaderMaterial({
-    uniforms: { uScale: { value: 800 }, uMinPx: { value: 2.5 }, uMaxPx: { value: 26 } },
+    uniforms: { uScale: { value: 800 }, uMinPx: { value: 2.5 }, uMaxPx: { value: 26 }, uGlow: { value: 1 } },
     transparent: true,
     depthWrite: false,
     blending: AdditiveBlending,
@@ -413,14 +417,16 @@ export const createGlowPoints = (count: number): GlowPoints => {
       uniform float uScale;
       uniform float uMinPx;
       uniform float uMaxPx;
+      uniform float uGlow;
       varying vec3 vColor;
       varying float vFade;
       void main() {
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         gl_Position = projectionMatrix * mv;
         float d = max(-mv.z, 0.1);
-        float px = size * uScale / d;
-        gl_PointSize = clamp(px, uMinPx, uMaxPx) * step(0.001, size);
+        // Lights read bigger as it gets dark: the halo grows with the glow factor, the core does not.
+        float px = size * uScale / d * (0.7 + 0.3 * uGlow);
+        gl_PointSize = clamp(px, uMinPx, uMaxPx * uGlow) * step(0.001, size);
         vFade = clamp(px / uMinPx, 0.35, 1.0) * (1.0 - smoothstep(4000.0, 9000.0, d));
         vColor = color;
         #include <logdepthbuf_vertex>
@@ -429,6 +435,7 @@ export const createGlowPoints = (count: number): GlowPoints => {
     fragmentShader: /* glsl */ `
       #include <common>
       #include <logdepthbuf_pars_fragment>
+      uniform float uGlow;
       varying vec3 vColor;
       varying float vFade;
       void main() {
@@ -436,10 +443,10 @@ export const createGlowPoints = (count: number): GlowPoints => {
         vec2 c = gl_PointCoord - 0.5;
         float r = length(c) * 2.0;
         float core = smoothstep(0.55, 0.0, r);
-        float halo = smoothstep(1.0, 0.0, r) * 0.35;
+        float halo = smoothstep(1.0, 0.0, r) * (0.35 + 0.25 * (uGlow - 1.0));
         float a = (core + halo) * vFade;
         if (a < 0.01) discard;
-        gl_FragColor = vec4(vColor * a * 6.0, a);
+        gl_FragColor = vec4(vColor * a * 6.0 * uGlow, a);
         #include <colorspace_fragment>
       }
     `,

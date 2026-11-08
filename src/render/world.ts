@@ -22,7 +22,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js';
-import { createEnvironment, type Environment } from './environment';
+import { createEnvironment, type Environment, type TimeOfDay } from './environment';
 import { sampleGround, type GroundSample } from '../sim/airfield';
 import { AirfieldView } from './airfieldView';
 import { AircraftView, type AircraftPose } from './aircraftView';
@@ -61,6 +61,7 @@ export interface FrameInput {
   guidance: boolean;
   reducedMotion: boolean;
   dof: boolean;
+  timeOfDay: TimeOfDay;
 }
 
 /** Captures scene-pass-only counters so post-processing quads are reported separately. */
@@ -225,6 +226,7 @@ export class World {
     // Cockpit view hides only the closed exterior Fuselage shell, restored for every other view.
     this.aircraft.setFuselageVisible(this.rig.mode !== 'cockpit');
     const focus = this.rig.mode === 'orbit' ? _origin : f.pose.pos;
+    if (f.timeOfDay !== this.env.timeOfDay) this.env.setTimeOfDay(f.timeOfDay);
     this.env.update(focus);
     this.env.sky.position.copy(cam.position);
     this.airfield.updateWindsock(f.windReadout, f.time);
@@ -233,6 +235,7 @@ export class World {
     const drawH = r.getDrawingBufferSize(_size).y;
     const scale = drawH / (2 * Math.tan((cam.fov * Math.PI) / 360));
     (this.airfield.glow.material.uniforms['uScale'] as { value: number }).value = scale;
+    (this.airfield.glow.material.uniforms['uGlow'] as { value: number }).value = this.env.lightGlow;
     this.effects.scaleUniform.value = scale;
     this.effects.update(f.dt, f.wind);
     if (this.contactBlob) {
@@ -247,6 +250,8 @@ export class World {
     }
     const o = this.airfield.oceanUniforms;
     o.uSunDir.value.copy(this.env.sunDir);
+    o.uSunColor.value.copy(this.env.sunColor);
+    o.uDaylight.value = this.env.daylight;
     o.uSkyHorizon.value.copy(this.env.skyHorizon);
     o.uSkyZenith.value.copy(this.env.skyZenith);
     if (this.bokeh) {
